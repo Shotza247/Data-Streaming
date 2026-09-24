@@ -1,0 +1,16 @@
+# docker/Dockerfile.mlflow
+#
+# Custom MLflow tracking server image.
+# MLflow server runs on port 5000 inside the container (mapped to 5001 on host).
+
+FROM python:3.11-slim
+
+# Install MLflow, PostgreSQL adapter, and S3-compatible storage support
+RUN pip install --no-cache-dir \
+    mlflow==2.12.2 \
+    psycopg2-binary==2.9.9 \
+    boto3==1.34.112
+
+EXPOSE 5000
+
+CMD ["mlflow", "server"]

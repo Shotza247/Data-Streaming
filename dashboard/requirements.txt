@@ -1,0 +1,8 @@
+streamlit
+redis
+psycopg2-binary
+duckdb
+boto3
+requests
+pandas
+plotly

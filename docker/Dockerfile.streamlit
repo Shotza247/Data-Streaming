@@ -1,0 +1,17 @@
+# docker/Dockerfile.streamlit
+#
+# Custom Streamlit dashboard image.
+# Mounts ./dashboard:/app at runtime for live development.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dashboard dependencies
+COPY dashboard/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+EXPOSE 8501
+
+ENTRYPOINT ["streamlit", "run"]
+CMD ["app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
