@@ -1,21 +1,37 @@
 # Makefile — Open-Source Real-Time Streaming Analytics Platform
-# Convenience targets for Docker/Podman Compose lifecycle management.
+# Convenience targets for Podman Compose lifecycle management.
 #
-# Automatically detects whether `docker compose` or `podman-compose` is
-# available and uses the first one found.
+# This project runs on Podman. COMPOSE uses `podman compose` (Podman v4.7+
+# built-in) and falls back to `podman-compose` (standalone pip package).
+# CONTAINER_CLI is used for `exec` calls (e.g. submitting Flink SQL scripts).
 
-ifeq ($(shell command -v docker 2>/dev/null),)
-  COMPOSE := podman-compose
-else
-  COMPOSE := docker compose
+ifeq ($(shell command -v podman 2>/dev/null),)
+  $(error Podman not found. Install Podman Desktop from https://podman.io)
 endif
+
+# Prefer the built-in `podman compose` subcommand (Podman v4.7+);
+# fall back to the standalone podman-compose if not available.
+ifneq ($(shell podman compose version 2>/dev/null),)
+  COMPOSE := podman compose
+else
+  COMPOSE := podman-compose
+endif
+
+CONTAINER_CLI := podman
 
 .PHONY: up down restart logs \
         topic-list submit-sql seed smoke-test reset
 
-# Start all infrastructure services in detached mode
-up:
+# Sync build-context files into docker/ then start all services
+up: _sync-docker-context
 	$(COMPOSE) up -d
+
+# Sync build-context subdirectories used by podman-compose.
+# podman-compose 1.6 requires a Containerfile at the root of each build context.
+# Each service gets docker/build/<service>/Containerfile + its build-time assets.
+_sync-docker-context:
+	cp dashboard/requirements.txt       docker/build/streamlit/requirements.streamlit.txt
+	cp dashboard/.streamlit/config.toml docker/build/streamlit/streamlit_config.toml
 
 # Stop and remove all containers, networks, and volumes
 down:
@@ -30,7 +46,7 @@ logs:
 
 # List Kafka topics (exec into kafka container)
 topic-list:
-	$(COMPOSE) exec kafka \
+	$(CONTAINER_CLI) exec kafka \
 		kafka-topics --bootstrap-server localhost:9092 --list
 
 # Submit all Flink SQL jobs via the Python wrapper script
