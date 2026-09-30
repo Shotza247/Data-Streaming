@@ -1,17 +1,35 @@
 # docker/Dockerfile.streamlit
 #
 # Custom Streamlit dashboard image.
-# Mounts ./dashboard:/app at runtime for live development.
+# Build context is ./docker/ — files needed at build time are copied here.
+# ./dashboard is volume-mounted at /app at runtime for live reloading.
+#
+# NOTE: Because build context = ./docker, we copy requirements.txt and
+# .streamlit/config.toml directly from the docker/ folder.
+# These are kept in sync with dashboard/ via the copy targets in the Makefile.
 
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dashboard dependencies
-COPY dashboard/requirements.txt /app/requirements.txt
+# Install system deps for psycopg2 and duckdb
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# requirements.txt is copied into docker/ by `make up` (see Makefile sync step)
+COPY requirements.streamlit.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# .streamlit config baked into image (also present in the volume mount at runtime)
+COPY streamlit_config.toml /app/.streamlit/config.toml
 
 EXPOSE 8501
 
-ENTRYPOINT ["streamlit", "run"]
-CMD ["app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+
+ENTRYPOINT ["streamlit", "run", "app.py", \
+            "--server.port=8501", \
+            "--server.address=0.0.0.0", \
+            "--server.runOnSave=true"]
