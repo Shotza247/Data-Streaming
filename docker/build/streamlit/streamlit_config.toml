@@ -1,0 +1,14 @@
+[server]
+runOnSave = true
+port = 8501
+address = "0.0.0.0"
+
+[theme]
+primaryColor         = "#2563eb"
+backgroundColor      = "#ffffff"
+secondaryBackgroundColor = "#f0f6ff"
+textColor            = "#1a3a5c"
+font                 = "sans serif"
+
+[browser]
+gatherUsageStats = false

@@ -1,0 +1,33 @@
+# docker/Dockerfile.flink
+#
+# Custom Flink 1.18 image with all connector JARs pre-installed in /opt/flink/lib/.
+# This is the single source of truth for the connector version matrix.
+# Risk 1 mitigation: all Flink services (jobmanager, taskmanager, sql-client)
+# use this image — NOT the base apache/flink:1.18 directly.
+
+FROM apache/flink:1.18
+
+# Install curl (already present in the Flink image, but keep for safety)
+# and download the pinned connector JARs into /opt/flink/lib/
+
+# --- Flink SQL Kafka connector (must match Flink 1.18) ---------------------
+ADD https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka-3.1.0-1.18/flink-sql-connector-kafka-3.1.0-1.18.jar \
+    /opt/flink/lib/flink-sql-connector-kafka-3.1.0-1.18.jar
+
+# --- Flink JDBC connector --------------------------------------------------
+ADD https://repo1.maven.org/maven2/org/apache/flink/flink-connector-jdbc-3.1.2-1.18/flink-connector-jdbc-3.1.2-1.18.jar \
+    /opt/flink/lib/flink-connector-jdbc-3.1.2-1.18.jar
+
+# --- Flink S3 filesystem (S3A) connector for MinIO integration ------------
+ADD https://repo1.maven.org/maven2/org/apache/flink/flink-s3-fs-hadoop-1.18.1/flink-s3-fs-hadoop-1.18.1.jar \
+    /opt/flink/lib/flink-s3-fs-hadoop-1.18.1.jar
+
+# --- PostgreSQL JDBC driver (required by the JDBC connector) ---------------
+ADD https://repo1.maven.org/maven2/org/postgresql/postgresql-42.7.3/postgresql-42.7.3.jar \
+    /opt/flink/lib/postgresql-42.7.3.jar
+
+# Verify the JARs are present
+RUN ls -la /opt/flink/lib/flink-sql-connector-kafka-3.1.0-1.18.jar \
+    && ls -la /opt/flink/lib/flink-connector-jdbc-3.1.2-1.18.jar \
+    && ls -la /opt/flink/lib/flink-s3-fs-hadoop-1.18.1.jar \
+    && ls -la /opt/flink/lib/postgresql-42.7.3.jar
