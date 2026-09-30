@@ -49,21 +49,31 @@ through a Streamlit dashboard.
 
 ## Prerequisites
 
-- Docker Engine 24+ or Docker Desktop
-- Docker Compose v2+ (plugin)
+- **Podman Desktop** (v4.7+) — [podman.io](https://podman.io)
+  - Podman v4.7+ includes `podman compose` built-in; earlier versions require `pip install podman-compose`
+  - Ensure the Podman machine is started: `podman machine start`
+- **Python 3.11+** (for `make submit-sql`, `make seed`, `make smoke-test`)
+- **Make** — available via Git for Windows or WSL
 - 16 GB RAM recommended (Kafka + Flink + Postgres + Redis + MinIO + Qdrant + MLflow + Streamlit + producers)
+
+> ⚠️ **Podman note:** `podman compose` uses the `streaming-net` network in rootless mode. If you see
+> hostname resolution errors between containers, ensure `podman machine` is running and that
+> `--userns=keep-id` is **not** set globally in your `containers.conf`.
 
 ## Quickstart
 
 ```bash
+# 0. Ensure Podman machine is running
+podman machine start
+
 # 1. Clone and enter the project directory
 git clone <repo-url>
 cd "data streaming"
 
-# 2. Start the infrastructure stack
+# 2. Build images and start the infrastructure stack
 make up
 
-# 3. Wait for services to become healthy, then submit Flink SQL jobs
+# 3. Wait for services to become healthy (~60s), then submit Flink SQL jobs
 make submit-sql
 
 # 4. Seed Qdrant vector store (only after cleaned-tax bucket has data)
