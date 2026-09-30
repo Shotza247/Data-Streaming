@@ -5,37 +5,23 @@
 -- provisions the necessary database users.
 --
 -- This script runs inside the postgres Docker container on first startup.
--- The default `taxdb` database is created via the POSTGRES_DB env var, but
--- we also create it here conditionally for idempotency (e.g. when mounting
--- this script into an existing volume).
+-- The default `taxdb` database is created via the POSTGRES_DB env var.
+--
+-- NOTE: CREATE DATABASE cannot run inside a DO block or transaction in
+-- PostgreSQL. We use psql's \gexec approach to conditionally create databases.
 
 -- Create marquez database if it doesn't exist
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'marquez') THEN
-        CREATE DATABASE marquez;
-    END IF;
-END
-$$;
+SELECT 'CREATE DATABASE marquez'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'marquez')\gexec
 
 -- Create mlflow database if it doesn't exist
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'mlflow') THEN
-        CREATE DATABASE mlflow;
-    END IF;
-END
-$$;
+SELECT 'CREATE DATABASE mlflow'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'mlflow')\gexec
 
 -- Create taxdb database if it doesn't exist (POSTGRES_DB already creates it,
 -- but this block makes the script idempotent for re-runs)
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'taxdb') THEN
-        CREATE DATABASE taxdb;
-    END IF;
-END
-$$;
+SELECT 'CREATE DATABASE taxdb'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'taxdb')\gexec
 
 -- Create the tax-domain user with password (or update password if exists)
 DO $$
