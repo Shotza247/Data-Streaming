@@ -60,8 +60,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   flink-jobmanager:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.flink
+      context: ./docker/build/flink
     container_name: flink-jobmanager
     depends_on:
       - kafka
@@ -85,8 +84,7 @@ services:
 
   flink-taskmanager:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.flink
+      context: ./docker/build/flink
     container_name: flink-taskmanager
     depends_on:
       - flink-jobmanager
@@ -107,8 +105,7 @@ services:
 
   flink-sql-client:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.flink
+      context: ./docker/build/flink
     container_name: flink-sql-client
     profiles: ["tools"]
     depends_on:
@@ -251,8 +248,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   mlflow:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.mlflow
+      context: ./docker/build/mlflow
     container_name: mlflow
     depends_on:
       - postgres
@@ -279,17 +275,8 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   streamlit:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.streamlit
+      context: ./docker/build/streamlit
     container_name: streamlit
-    depends_on:
-      - kafka
-      - postgres
-      - redis
-      - minio
-      - qdrant
-      - mlflow
-      - marquez
     ports:
       - "8501:8501"
     volumes:
