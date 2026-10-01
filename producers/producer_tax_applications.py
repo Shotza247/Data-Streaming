@@ -28,7 +28,7 @@ from datetime import date, timedelta
 from faker import Faker
 from base_producer import BaseProducer
 
-fake = Faker("en_ZA")   # South African locale for realistic names
+fake = Faker("en_GB")   # en_ZA removed in Faker 25.x — en_GB gives realistic names
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 

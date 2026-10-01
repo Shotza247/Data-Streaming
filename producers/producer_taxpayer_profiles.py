@@ -20,7 +20,7 @@ import random
 from faker import Faker
 from base_producer import BaseProducer
 
-fake = Faker("en_ZA")
+fake = Faker("en_GB")   # en_ZA removed in Faker 25.x
 
 # Shared customer ID pool — must match producer_tax_applications.py
 CUSTOMER_ID_POOL = [f"C{str(i).zfill(5)}" for i in range(1, 5001)]
