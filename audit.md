@@ -99,3 +99,47 @@ podman compose ps
 ```
 
 ---
+
+## Entry 002 — Sub-Task 2: Kafka Topic Setup and 4 Tax Domain Producers
+
+**Date:** 2026-10-01
+**Status:** ✅ COMPLETE
+
+### Files Created
+| File | Description |
+|---|---|
+| `producers/base_producer.py` | Abstract base: confluent-kafka, auto topic creation, rate control, graceful shutdown |
+| `producers/producer_tax_applications.py` | Fields: application_id, customer_id, customer_name, email, country, province, taxable_income, employment_type, employment_status, submitted_date, tax_year, filing_status, is_fraud |
+| `producers/producer_taxpayer_profiles.py` | Fields: customer_id, age, risk_score, historical_filings_count, avg_income_3yr, flagged_previously |
+| `producers/producer_fraud_signals.py` | Fields: signal_id, application_id, customer_id, signal_type, severity, detected_at, description |
+| `producers/producer_audit_events.py` | Fields: event_id, application_id, actor, action, timestamp, metadata |
+| `producers/topic_init.py` | One-shot idempotent topic creation for all 4 topics |
+| `producers/Containerfile` | python:3.11-slim, CMD overridden per service in compose |
+| `producers/requirements.txt` | confluent-kafka==2.4.0, faker==25.2.0, python-dotenv==1.0.1 |
+| `tests/test_subtask2.log` | Topics verified, message counts, issues + resolutions |
+
+### Kafka Topics Confirmed
+All 4 topics exist with 3 partitions, replication factor 1:
+`tax-applications` · `taxpayer-profiles` · `fraud-signals` · `audit-events`
+
+### Message Counts Verified (~90s runtime)
+| Topic | Count |
+|---|---|
+| tax-applications | 82 |
+| taxpayer-profiles | 84 |
+| fraud-signals | 1775 |
+| audit-events | 1772 |
+
+### Issues Encountered and Resolved
+1. **Faker en_ZA locale** — removed in Faker 25.x. Fixed: changed to `en_GB`
+2. **Flink Containerfile DNS** — `ADD <url>` fails in Podman WSL at build time. Fixed: changed to `RUN wget`
+3. **podman-compose profile rebuild timeout** — builds all services including Flink. Fixed: `podman build` once, then `podman run` directly
+
+### Commits
+- `cf430b8` feat(producers): add 4 tax-domain Kafka producers and topic init
+- `be57673` feat(compose): add kafka-topic-init and 4 producer services
+- `5093ef2` feat(makefile): add producer and topic management targets
+- `fc04b05` fix(producers): replace en_ZA Faker locale with en_GB
+- `7ec9c55` fix(build): replace ADD with RUN wget in Flink Containerfile
+
+---
