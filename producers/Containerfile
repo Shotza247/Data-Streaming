@@ -1,0 +1,25 @@
+# docker/build/producer/Containerfile
+#
+# Shared image for all 4 tax-domain Kafka producers.
+# Each producer runs as a separate container using this same image,
+# with CMD overridden per service in docker-compose.yml.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copy all producer source files
+COPY . /app/
+
+# Default: run the tax-applications producer
+# Override CMD in docker-compose.yml per service
+CMD ["python", "producer_tax_applications.py"]
