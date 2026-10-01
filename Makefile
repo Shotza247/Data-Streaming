@@ -49,6 +49,22 @@ topic-list:
 	$(CONTAINER_CLI) exec kafka \
 		kafka-topics --bootstrap-server localhost:9092 --list
 
+# Initialise Kafka topics (run once after 'make up')
+init-topics:
+	$(COMPOSE) --profile setup up kafka-topic-init
+
+# Start all 4 tax-domain producers
+producers-up:
+	$(COMPOSE) --profile producers up -d --build
+
+# Stop all producers
+producers-down:
+	$(COMPOSE) --profile producers down
+
+# Stream logs from all producers
+producers-logs:
+	$(COMPOSE) --profile producers logs -f
+
 # Submit all Flink SQL jobs via the Python wrapper script
 submit-sql:
 	python scripts/submit_flink_jobs.py
