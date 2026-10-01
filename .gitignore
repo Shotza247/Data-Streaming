@@ -27,6 +27,7 @@ env/
 !.env.example
 
 # Logs
+!tests/*.log
 *.log
 logs/
 

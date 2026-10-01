@@ -1,0 +1,50 @@
+# Sub-Task 2 — Test Log
+# Generated: 2026-10-01
+# Scope: Kafka topic creation + 4 producer containers
+
+## TOPICS VERIFIED
+All 4 topics created and confirmed in Kafka:
+  tax-applications    — 3 partitions, replication 1
+  taxpayer-profiles   — 3 partitions, replication 1
+  fraud-signals       — 3 partitions, replication 1
+  audit-events        — 3 partitions, replication 1
+
+## MESSAGE COUNTS (after ~90 seconds of publishing)
+  tax-applications  :   82 messages  (1/sec)
+  taxpayer-profiles :   84 messages  (1/sec)
+  fraud-signals     : 1775 messages  (fraud + audit started earlier)
+  audit-events      : 1772 messages
+
+## PRODUCER CONTAINER STATUS
+  producer-tax-applications   — Up, publishing
+  producer-taxpayer-profiles  — Up, publishing
+  producer-fraud-signals      — Up, publishing
+  producer-audit-events       — Up, publishing
+
+## ISSUES ENCOUNTERED AND RESOLVED
+
+Issue 1: Faker en_ZA locale invalid in Faker 25.x
+  Error: AttributeError: Invalid configuration for faker locale 'en_ZA'
+  Fix:   Changed Faker("en_ZA") to Faker("en_GB") in both affected producers
+  Commit: fix(producers): replace en_ZA Faker locale with en_GB
+
+Issue 2: Flink Containerfile DNS failure (Maven JARs)
+  Error: dial tcp: lookup repo1.maven.org: Temporary failure in name resolution
+  Root:  ADD <https://...> resolves DNS at build time on WSL host layer,
+         which lacks proper DNS in Podman Desktop WSL environment
+  Fix:   Replaced all ADD <url> with RUN wget inside container layer
+  Commit: fix(build): replace ADD with RUN wget in Flink Containerfile
+
+Issue 3: podman compose --profile producers up -d --build timed out
+  Root:  podman-compose rebuilds ALL services in the profile list,
+         including Flink image (large download). Separate build step needed.
+  Fix:   Build producer image once with 'podman build', then start containers
+         with 'podman run' directly. Makefile producers-up target updated.
+
+## ANOMALY INJECTION CONFIRMED
+  tax-applications producer injects:
+    ~8% velocity repeat filers (same customer_id in rapid succession)
+    ~4% high-income anomalies (income 3-8x normal range)
+    is_fraud=True on anomalous records (MLflow training label)
+  fraud-signals producer generates:
+    7 signal types, weighted severity distribution

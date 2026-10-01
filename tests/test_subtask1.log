@@ -1,0 +1,67 @@
+# Sub-Task 1 + Dashboard — Test Log
+# Generated: 2026-07-08
+# Scope: Scaffold validation + Streamlit dashboard files
+
+## FILES CREATED — Dashboard Layer
+
+dashboard/
+  app.py                        — Main entry point, 5 st.tabs()
+  requirements.txt              — Pinned: streamlit>=1.35, redis>=5, psycopg2-binary>=2.9, duckdb>=0.10, boto3>=1.34, requests>=2.31, pandas>=2.2, plotly>=5.20
+  .streamlit/
+    config.toml                 — Theme: primaryColor=#2563eb, runOnSave=true, port=8501
+  tabs/
+    __init__.py                 — Empty package marker
+    tab_tax_kpi.py              — Tab 1: Redis KPIs + DuckDB trend + income histogram + graceful fallback
+    tab_fraud.py                — Tab 2: PostgreSQL fraud signals + DuckDB province summary + graceful fallback
+    tab_agent_chat.py           — Tab 3: LangGraph agent chat + demo mode when agent not built yet
+    tab_lineage.py              — Tab 4: Marquez API table + iframe embed + graceful fallback
+    tab_mlflow.py               — Tab 5: MLflow runs table + model stage badge + graceful fallback
+
+docker/
+  Dockerfile.streamlit          — Updated: added gcc/libpq-dev/curl, healthcheck, .streamlit config copy
+
+## GRACEFUL FALLBACK STRATEGY
+
+All 5 tabs implement the same pattern:
+  1. Attempt live connection (timeout=2-4s)
+  2. If connection fails → show amber status badge + info banner
+  3. Render demo/mock data so UI is never blank
+  4. Mock data is domain-realistic (ZAR incomes, SA provinces, real field names)
+
+Tabs that will show live data once services are running:
+  - tab_tax_kpi.py    : Redis + MinIO/DuckDB (requires Sub-Tasks 2, 3, 4)
+  - tab_fraud.py      : PostgreSQL + MinIO/DuckDB (requires Sub-Tasks 2, 3, 4)
+  - tab_agent_chat.py : LangGraph agent (requires Sub-Task 7)
+  - tab_lineage.py    : Marquez API (requires Sub-Task 8 Phase B)
+  - tab_mlflow.py     : MLflow REST API (requires Sub-Task 6)
+
+## PODMAN COMPOSE VALIDATION
+NOTE: This project uses Podman, not Docker. All compose commands use `podman compose`.
+
+Command to validate compose file:
+  podman compose config
+
+Command to build images and start full stack:
+  podman compose up -d --build
+
+Command to check streamlit container only (fastest test):
+  podman compose up -d --build streamlit
+
+Check container status:
+  podman compose ps
+
+Expected result: streamlit container healthy at http://localhost:8501
+
+## KNOWN ENVIRONMENT NOTE
+Podman binary not on automated PowerShell shell PATH.
+Manual execution required from a terminal where Podman is on PATH (e.g. Podman Desktop terminal).
+All file content correct and ready — no code errors detected via static review.
+
+## PODMAN-SPECIFIC COMPATIBILITY NOTES
+1. Makefile: Uses `podman compose` (built-in v4.7+) with fallback to `podman-compose`
+2. Makefile: Uses `podman exec` (not `docker exec`) for container exec calls
+3. scripts/submit_flink_jobs.py (Sub-Task 3): Must use `podman exec flink-sql-client ...`
+4. Rootless Podman: containers run without root — all port bindings below 1024 require
+   sysctl net.ipv4.ip_unprivileged_port_start=0 (not applicable here — all ports are 3000+)
+5. Volume mounts: Podman rootless may require :Z SELinux label on Linux.
+   On Windows/Mac with Podman Desktop this is NOT needed.
