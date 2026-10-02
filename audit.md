@@ -143,3 +143,34 @@ All 4 topics exist with 3 partitions, replication factor 1:
 - `7ec9c55` fix(build): replace ADD with RUN wget in Flink Containerfile
 
 ---
+
+## Entry 003 -- Sub-Task 8 Phase A: OpenLineage Client and Schema Helpers
+
+**Date:** 2026-10-01
+**Status:** COMPLETE
+
+### Files Created
+| File | Description |
+|---|---|
+| `lineage/openlineage_client.py` | LineageClient: start/complete/fail, POSTs RunEvent to Marquez, fire-and-forget |
+| `lineage/lineage_schemas.py` | Dataset builders: kafka, minio, postgres, mlflow, duckdb, redis, streamlit + pre-built field schemas |
+| `lineage/requirements.txt` | requests, python-dotenv |
+| `lineage/test_lineage_client.py` | Smoke test: 4 events emitted, Marquez API verified |
+| `tests/test_subtask8a.log` | Full test results and issues resolved |
+
+### Marquez Verification
+Jobs registered after smoke test:
+- flink: job_01_raw_to_minio, job_02_enrich, job_test_fail
+- mlflow: train_fraud_model
+
+### Issues Resolved
+1. Marquez v0.47.0 healthcheck endpoint is /api/v1/namespaces not /api/v1/health
+2. MARQUEZ_DB_USER/PASSWORD missing from .env -- hardcoded in compose
+3. init-postgres.sql gexec pattern failed silently -- replaced with plain SQL
+4. UnicodeEncodeError on Windows cp1252 console -- replaced unicode with ASCII
+
+### Commits
+- `42e7a30` feat(lineage): Sub-Task 8 Phase A -- OpenLineage client and schema helpers
+- `083157e` fix(infra): fix Marquez DB credentials and healthcheck endpoint
+
+---
