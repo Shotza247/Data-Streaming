@@ -20,7 +20,12 @@ endif
 CONTAINER_CLI := podman
 
 .PHONY: up down restart logs \
-        topic-list submit-sql seed smoke-test reset
+        topic-list init-topics \
+        producers-up producers-down producers-logs \
+        flink-up flink-logs flink-ui \
+        submit-sql submit-job \
+        kpi-poller-up kpi-poller-logs \
+        seed smoke-test reset
 
 # Sync build-context files into docker/ then start all services
 up: _sync-docker-context
@@ -65,9 +70,39 @@ producers-down:
 producers-logs:
 	$(COMPOSE) --profile producers logs -f
 
-# Submit all Flink SQL jobs via the Python wrapper script
+# ── Flink targets ─────────────────────────────────────────────────────────────
+
+# Start Flink jobmanager, taskmanager, and sql-client (pre-build image first)
+flink-up:
+	$(COMPOSE) up -d flink-jobmanager flink-taskmanager flink-sql-client
+
+# Follow Flink logs
+flink-logs:
+	$(COMPOSE) logs -f flink-jobmanager flink-taskmanager
+
+# Open Flink UI (prints URL)
+flink-ui:
+	@echo "Flink Job Manager UI: http://localhost:8081"
+
+# Submit all Flink SQL jobs (requires Flink containers running)
 submit-sql:
 	python scripts/submit_flink_jobs.py
+
+# Submit a single job by substring name, e.g.: make submit-job JOB=job_01
+submit-job:
+	python scripts/submit_flink_jobs.py $(JOB)
+
+# ── KPI Poller targets ────────────────────────────────────────────────────────
+
+# Start the Redis KPI cache poller
+kpi-poller-up:
+	$(COMPOSE) up -d kpi-poller
+
+# Stream KPI poller logs
+kpi-poller-logs:
+	$(COMPOSE) logs -f kpi-poller
+
+# ── Seeding and testing ───────────────────────────────────────────────────────
 
 # Preflight: ensure cleaned-tax bucket is non-empty, then seed Qdrant
 seed:

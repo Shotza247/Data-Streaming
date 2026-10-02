@@ -107,10 +107,15 @@ services:
     build:
       context: ./docker/build/flink
     container_name: flink-sql-client
-    profiles: ["tools"]
     depends_on:
       - flink-jobmanager
-    entrypoint: ["bin/sql-client.sh"]
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.rpc.port: 6123
+    # Keep the container alive so submit_flink_jobs.py can exec into it
+    entrypoint: ["tail", "-f", "/dev/null"]
     volumes:
       - ./flink-jobs:/opt/flink/jobs
     networks:
@@ -382,6 +387,40 @@ services:
     environment:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       PRODUCER_RATE_PER_SECOND: ${PRODUCER_RATE_PER_SECOND}
+    restart: unless-stopped
+    networks:
+      - streaming-net
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # KPI-to-Redis poller (polls PostgreSQL tax_kpi_windows → Redis hot cache)
+  # Restarts automatically every 30 s via the kpi_to_redis.py sleep loop.
+  # ─────────────────────────────────────────────────────────────────────────
+  kpi-poller:
+    image: python:3.11-slim
+    container_name: kpi-poller
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/app/scripts
+      - ./lineage:/app/lineage
+    working_dir: /app
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      KPI_POLL_INTERVAL_SEC: 30
+      KPI_WINDOW_LOOKBACK: 20
+      KPI_TTL_SECONDS: 900
+    command: >
+      bash -c "pip install psycopg2-binary redis python-dotenv --quiet &&
+               python scripts/kpi_to_redis.py"
     restart: unless-stopped
     networks:
       - streaming-net
