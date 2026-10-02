@@ -1,52 +1,27 @@
 -- docker/init-postgres.sql
 --
--- Initialisation script for the shared PostgreSQL instance.
--- Creates the three logical databases required by the platform and
--- provisions the necessary database users.
+-- PostgreSQL initialisation script for the Tax Analytics Platform.
+-- Runs inside the postgres container on first startup as the POSTGRES_USER
+-- (taxuser — set via POSTGRES_USER env var).
 --
--- This script runs inside the postgres Docker container on first startup.
--- The default `taxdb` database is created via the POSTGRES_DB env var.
+-- Creates:
+--   Databases : marquez, mlflow  (taxdb created automatically by POSTGRES_DB env var)
+--   Roles     : marquez (owns marquez db), taxuser already exists as superuser
 --
--- NOTE: CREATE DATABASE cannot run inside a DO block or transaction in
--- PostgreSQL. We use psql's \gexec approach to conditionally create databases.
+-- NOTE: taxuser is configured as POSTGRES_USER so it has SUPERUSER rights,
+-- which means this script can create other databases and roles.
 
--- Create marquez database if it doesn't exist
-SELECT 'CREATE DATABASE marquez'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'marquez')\gexec
+-- ── Create marquez database ───────────────────────────────────────────────────
+CREATE DATABASE marquez;
 
--- Create mlflow database if it doesn't exist
-SELECT 'CREATE DATABASE mlflow'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'mlflow')\gexec
+-- ── Create mlflow database ────────────────────────────────────────────────────
+CREATE DATABASE mlflow;
 
--- Create taxdb database if it doesn't exist (POSTGRES_DB already creates it,
--- but this block makes the script idempotent for re-runs)
-SELECT 'CREATE DATABASE taxdb'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'taxdb')\gexec
+-- ── Create marquez role for the Marquez API ───────────────────────────────────
+-- Marquez connects with username=marquez, password=marquez
+CREATE ROLE marquez WITH LOGIN PASSWORD 'marquez' SUPERUSER;
 
--- Create the tax-domain user with password (or update password if exists)
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'taxuser') THEN
-        CREATE ROLE taxuser LOGIN PASSWORD 'taxpass';
-    ELSE
-        ALTER ROLE taxuser LOGIN PASSWORD 'taxpass';
-    END IF;
-END
-$$;
-
--- Create the marquez role (Marquez default dev config connects as this user)
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'marquez') THEN
-        CREATE ROLE marquez LOGIN PASSWORD 'marquez' SUPERUSER;
-    ELSE
-        ALTER ROLE marquez LOGIN PASSWORD 'marquez' SUPERUSER;
-    END IF;
-END
-$$;
-
--- Grant privileges on the marquez database to marquez user
+-- ── Grant full access ─────────────────────────────────────────────────────────
 GRANT ALL PRIVILEGES ON DATABASE marquez TO marquez;
-
--- Grant privileges on the taxdb database to taxuser
-GRANT ALL PRIVILEGES ON DATABASE taxdb TO taxuser;
+GRANT ALL PRIVILEGES ON DATABASE taxdb  TO taxuser;
+GRANT ALL PRIVILEGES ON DATABASE mlflow TO taxuser;
