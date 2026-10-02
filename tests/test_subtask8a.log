@@ -1,0 +1,55 @@
+# Sub-Task 8 Phase A -- Lineage Client Smoke Test Log
+# Generated: 2026-10-01
+# Scope: openlineage_client.py + lineage_schemas.py verified against live Marquez
+
+## SMOKE TEST RESULTS
+
+[1] job_01_raw_to_minio  (flink namespace)
+    START -> COMPLETE emitted: OK
+    inputs:  kafka://tax-applications
+    outputs: minio://raw-tax/
+
+[2] job_02_enrich  (flink namespace)
+    START -> COMPLETE emitted: OK
+    inputs:  kafka://tax-applications, kafka://taxpayer-profiles
+    outputs: postgres://public.enriched_tax_applications
+
+[3] train_fraud_model  (mlflow namespace)
+    START -> COMPLETE emitted: OK
+    inputs:  minio://cleaned-tax/
+    outputs: mlflow://fraud-detector@1
+
+[4] job_test_fail  (flink namespace)
+    START -> FAIL emitted: OK
+    error: "Test failure -- intentional"
+
+[5] Marquez API verification
+    Namespace 'flink':  3 jobs registered
+      - job_01_raw_to_minio
+      - job_02_enrich
+      - job_test_fail
+    Namespace 'mlflow': 1 job registered
+      - train_fraud_model
+
+## ISSUES ENCOUNTERED AND RESOLVED
+
+Issue 1: Marquez healthcheck returning 404
+  Endpoint /api/v1/health does not exist in Marquez v0.47.0
+  Fix: Changed healthcheck to /api/v1/namespaces (returns 200)
+  Affected: docker-compose.yml healthcheck, LineageClient health check,
+            tab_lineage.py _marquez_healthy()
+
+Issue 2: Marquez DB credentials missing from .env
+  MARQUEZ_DB_USER / MARQUEZ_DB_PASSWORD not defined
+  Fix: Hardcoded 'marquez'/'marquez' in docker-compose.yml (demo values)
+
+Issue 3: init-postgres.sql failed to create marquez/mlflow databases
+  \gexec pattern (conditional CREATE DATABASE) failed silently
+  Root cause: postgres data volume already existed from first run with broken script
+  Fix 1: Simplified init SQL to plain CREATE DATABASE/ROLE statements
+  Fix 2: Applied missing databases manually via 'podman exec postgres psql'
+         for the existing data volume (no volume wipe needed)
+
+Issue 4: UnicodeEncodeError in test output (Windows cp1252 console)
+  Unicode checkmark char U+2713 not encodable in cp1252
+  Fix: Replaced all unicode chars in test output with ASCII equivalents
