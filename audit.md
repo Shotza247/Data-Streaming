@@ -174,3 +174,67 @@ Jobs registered after smoke test:
 - `083157e` fix(infra): fix Marquez DB credentials and healthcheck endpoint
 
 ---
+
+## Entry 004 — Sub-Task 3: Flink SQL Jobs, Submission Wrapper, KPI Poller
+
+**Date:** 2026-10-02
+**Status:** ✅ COMPLETE
+
+### Files Created / Modified
+
+| File | Status | Description |
+|---|---|---|
+| `flink-jobs/job_01_raw_to_minio.sql` | committed | Kafka → MinIO raw-tax (archived in prior session) |
+| `flink-jobs/job_02_enrich.sql` | committed | Temporal JOIN tax-apps + taxpayer-profiles → PostgreSQL enriched_tax_applications |
+| `flink-jobs/job_03_kpi_windows.sql` | fixed + committed | Tumbling 5-min windows → PostgreSQL tax_kpi_windows (FIRST_VALUE → MAX fix) |
+| `flink-jobs/job_04_fraud_pattern.sql` | NEW | High-frequency submitter + income spike → kafka://fraud-signals |
+| `flink-jobs/job_05_cleaned.sql` | NEW | UPPER/TRIM standardise + filter → MinIO cleaned-tax (DuckDB source of truth) |
+| `scripts/submit_flink_jobs.py` | NEW | OpenLineage emit + podman exec sql-client.sh -f <script> per job |
+| `scripts/kpi_to_redis.py` | NEW | Polls PostgreSQL tax_kpi_windows → Redis HASHes (15 min TTL), tax:kpi:latest key |
+| `docker-compose.yml` | UPDATED | flink-sql-client keep-alive entrypoint; kpi-poller service added |
+| `Makefile` | UPDATED | flink-up, flink-logs, flink-ui, submit-job, kpi-poller-up, kpi-poller-logs targets |
+| `tests/test_subtask3.log` | NEW | Full design decisions + manual start steps |
+
+### Flink SQL Job Summary
+
+| Job | Source | Sink | Pattern |
+|---|---|---|---|
+| job_01 | kafka://tax-applications | minio://raw-tax/ | Raw archival, JSON, partitioned by date |
+| job_02 | kafka://tax-applications + taxpayer-profiles | postgres://enriched_tax_applications | Temporal LEFT JOIN on customer_id |
+| job_03 | kafka://tax-applications | postgres://tax_kpi_windows | Tumbling 5-min aggregation: count, avg_income, fraud_rate |
+| job_04 | kafka://tax-applications | kafka://fraud-signals | CEP: high-frequency (≥3 in 10 min) + income spike (>500k) |
+| job_05 | kafka://tax-applications | minio://cleaned-tax/ | UPPER/TRIM standardise + NULL filter + processed_at |
+
+### Design Decisions
+- **job_03 fix**: `FIRST_VALUE` over `ORDER BY TUMBLE_START` is invalid in Flink SQL GROUP BY windows — replaced with `MAX(province)` (deterministic, same scope)
+- **job_04 CEP**: `MATCH_RECOGNIZE` requires Flink CEP JAR not in our image — used tumbling window `HAVING COUNT(*) >= 3` equivalent
+- **flink-sql-client**: Changed entrypoint from one-shot `sql-client.sh` to `tail -f /dev/null` keep-alive; removed `profiles: [tools]` so it starts with default stack
+- **kpi-poller**: `python:3.11-slim` with inline `pip install`; writes both per-window hash keys + `tax:kpi:latest` summary key
+
+### Makefile Targets Added
+```
+make flink-up          # start flink-jobmanager + taskmanager + sql-client
+make flink-logs        # follow Flink container logs
+make submit-sql        # submit all 5 jobs via submit_flink_jobs.py
+make submit-job JOB=job_01  # submit single job by name substring
+make kpi-poller-up     # start Redis KPI cache poller
+make kpi-poller-logs   # follow poller logs
+```
+
+### Manual Steps to Activate Flink
+```bash
+podman build -t flink-custom:1.18 ./docker/build/flink/
+make flink-up
+# wait 30s, then:
+make submit-sql
+make kpi-poller-up
+```
+
+### Commits
+- `feat(flink): add job_04 fraud pattern detection and job_05 cleaned output`
+- `feat(scripts): add submit_flink_jobs.py and kpi_to_redis.py`
+- `feat(compose): add kpi-poller service and fix flink-sql-client entrypoint`
+- `fix(flink): replace FIRST_VALUE with MAX in job_03 KPI windows`
+- `docs(audit): Sub-Task 3 complete`
+
+---
