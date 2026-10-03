@@ -238,3 +238,43 @@ make kpi-poller-up
 - `docs(audit): Sub-Task 3 complete`
 
 ---
+
+## Entry 005 — Sub-Task 4: Storage Layer — PostgreSQL, Redis, MinIO, DuckDB
+
+**Date:** 2026-10-02
+**Status:** ✅ COMPLETE
+
+### Files Created
+
+| File | Description |
+|---|---|
+| `storage/postgres_schema.sql` | 4 tables + 4x indexes each + 2 views; applied to live taxdb |
+| `storage/redis_schema.md` | Key naming conventions, TTL policies, field-level docs for all 4 key families |
+| `storage/minio_client.py` | boto3 wrapper: list_files, list_partitions, bucket_has_files, download, upload |
+| `storage/duckdb_queries.py` | 6 named query functions; httpfs MinIO config; graceful empty DataFrame fallback |
+
+### PostgreSQL Applied Live
+```
+Get-Content storage/postgres_schema.sql | podman exec -i postgres psql -U taxuser -d taxdb
+```
+All CREATE TABLE / CREATE INDEX / CREATE VIEW commands executed successfully.
+
+### DuckDB Query Functions
+
+| Function | Output | Consumer |
+|---|---|---|
+| `get_tax_kpi_trend(n)` | time-series KPI windows | Dashboard Tab 1 trend chart |
+| `get_fraud_summary()` | fraud by type/severity/province | Dashboard Tab 2 bar chart |
+| `get_cleaned_data_for_ml(n)` | labelled records | MLflow train_fraud_model.py |
+| `get_income_distribution(n_buckets)` | histogram buckets | Dashboard Tab 1 histogram |
+| `get_top_flagged_customers(n)` | customer ranking | Dashboard Tab 2 table |
+| `get_province_fraud_heatmap()` | province-level metrics | Dashboard Tab 2 heatmap |
+
+### Commits
+- `feat(storage): add postgres_schema.sql with 4 tables, indexes, and views`
+- `feat(storage): add redis_schema.md key naming and TTL policy documentation`
+- `feat(storage): add minio_client.py boto3 wrapper`
+- `feat(storage): add duckdb_queries.py with 6 named OLAP query functions`
+- `docs(audit): Sub-Task 4 complete`
+
+---
