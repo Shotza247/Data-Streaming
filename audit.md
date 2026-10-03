@@ -278,3 +278,41 @@ All CREATE TABLE / CREATE INDEX / CREATE VIEW commands executed successfully.
 - `docs(audit): Sub-Task 4 complete`
 
 ---
+
+## Entry 006 — Sub-Task 5: Qdrant Vector Store — Fraud Similarity and Regulatory KB
+
+**Date:** 2026-10-02
+**Status:** ✅ COMPLETE
+
+### Files Created
+
+| File | Description |
+|---|---|
+| `agents/__init__.py` | Package marker |
+| `agents/embeddings.py` | SentenceTransformer singleton, embed_text/embed_batch, build_tax_record_text |
+| `agents/embed_tax_records.py` | Reads DuckDB cleaned data → embeds → upserts into fraud_similarity (batched, idempotent) |
+| `agents/embed_regulatory_kb.py` | 50 synthetic SA tax law chunks → regulatory_kb Qdrant collection |
+| `agents/qdrant_search.py` | search_similar_fraud(), search_regulatory_kb(), format_kb_context() |
+| `agents/requirements.txt` | sentence-transformers, qdrant-client, langgraph, mlflow, torch CPU |
+| `scripts/seed_qdrant.py` | One-shot orchestrator: [Risk 3] preflight + seed both collections |
+
+### Qdrant Collections
+
+| Collection | Vectors | Distance | Payload |
+|---|---|---|---|
+| `fraud_similarity` | 384-dim | Cosine | application_id, customer_id, taxable_income, employment_type, province, is_fraud |
+| `regulatory_kb` | 384-dim | Cosine | chunk_id, source_doc, section, text |
+
+### Regulatory KB Coverage
+50 chunks across 6 source documents covering SA Income Tax Act, Tax Administration Act,
+SARS Tax Tables 2024, VAT Act, SARS Fraud Prevention Policy, PAYE Employer Guide.
+
+### Commits
+- `feat(agents): add embeddings.py sentence-transformer utility`
+- `feat(agents): add embed_tax_records.py fraud_similarity collection seeder`
+- `feat(agents): add embed_regulatory_kb.py 50-chunk SA tax regulatory KB`
+- `feat(agents): add qdrant_search.py search API functions`
+- `feat(scripts): add seed_qdrant.py with Risk 3 preflight guard`
+- `docs(audit): Sub-Task 5 complete`
+
+---

@@ -1,0 +1,73 @@
+Sub-Task 5 — Qdrant Vector Store: Embeddings for Fraud Similarity and Regulatory Q&A
+=======================================================================================
+Date       : 2026-10-02
+Status     : COMPLETE
+
+FILES WRITTEN
+-------------
+agents/__init__.py                - Package marker
+agents/embeddings.py              - SentenceTransformer singleton, embed_text, embed_batch, build_tax_record_text
+agents/embed_tax_records.py       - MinIO/DuckDB -> fraud_similarity Qdrant collection (batched upsert)
+agents/embed_regulatory_kb.py     - 50 synthetic SA tax law chunks -> regulatory_kb Qdrant collection
+agents/qdrant_search.py           - search_similar_fraud(), search_regulatory_kb(), format_kb_context()
+agents/requirements.txt           - sentence-transformers, qdrant-client, langgraph, mlflow, etc.
+scripts/seed_qdrant.py            - Orchestrator: preflight check + seed both collections
+
+DESIGN DECISIONS
+-----------------
+1. Embedding model: sentence-transformers/all-MiniLM-L6-v2
+   - 384 dimensions, cosine distance
+   - ~80MB download, CPU-only, no GPU required
+   - normalize_embeddings=True ensures cosine similarity via dot product
+
+2. fraud_similarity collection
+   - Text representation: "Province X income Y employment Z status W filing V fraud F"
+   - Payload: application_id, customer_id, taxable_income, employment_type, province, risk_score, is_fraud
+   - Point ID: UUID5(DNS namespace, application_id) — stable, idempotent upserts
+
+3. regulatory_kb collection
+   - 50 synthetic chunks from 5 source documents:
+       Income_Tax_Act_58_1962 (10 sections)
+       Tax_Administration_Act_28_2011 (10 sections)
+       SARS_Tax_Tables_2024 (8 brackets + threshold)
+       VAT_Act_89_1991 (5 sections)
+       SARS_Fraud_Prevention_Policy (8 sections)
+       PAYE_Employer_Guide_2024 (7 sections)
+   - Point ID: UUID5(DNS namespace, source_doc::section) — idempotent
+   - Payload: chunk_id, source_doc, section, text
+
+4. [Risk 3] Preflight guard in seed_qdrant.py
+   - bucket_has_files(BUCKET_CLEANED) called before embed_tax_records
+   - Exits with clear error if cleaned-tax bucket is empty
+   - --skip-preflight flag for testing with synthetic data
+   - --kb-only flag skips preflight entirely (KB has no MinIO dependency)
+
+5. Qdrant collections not yet created — will be created on first run of seed_qdrant.py
+   Command: python scripts/seed_qdrant.py --kb-only  (safe to run now)
+            python scripts/seed_qdrant.py            (run after make submit-sql + wait for cleaned data)
+
+USAGE
+------
+# Seed regulatory KB now (no MinIO data needed):
+python scripts/seed_qdrant.py --kb-only
+
+# Seed fraud records after Flink job_05 has produced cleaned data:
+python scripts/seed_qdrant.py
+
+# Or via Makefile:
+make seed
+
+QDRANT SEARCH API
+-----------------
+from agents.qdrant_search import search_similar_fraud, search_regulatory_kb
+
+results = search_similar_fraud({
+    "province": "GAUTENG",
+    "taxable_income": 750000,
+    "employment_type": "SELF_EMPLOYED",
+    "employment_status": "ACTIVE",
+    "filing_status": "INDIVIDUAL",
+}, top_k=5)
+
+results = search_regulatory_kb("What is the penalty for late tax filing?", top_k=3)
+context = format_kb_context(results)  # formats into RAG prompt string
