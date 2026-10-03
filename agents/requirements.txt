@@ -1,0 +1,34 @@
+# agents/requirements.txt
+# Dependencies for Qdrant embeddings, LangGraph agents, and LLM inference
+# Pin versions for reproducibility on CPU-only containers.
+
+# ── Embeddings ────────────────────────────────────────────────────────────────
+sentence-transformers==2.7.0
+# sentence-transformers pulls torch, but we need the CPU-only wheel.
+# If building on CPU-only host, install torch first:
+#   pip install torch==2.3.0+cpu --index-url https://download.pytorch.org/whl/cpu
+
+# ── Vector store ──────────────────────────────────────────────────────────────
+qdrant-client==1.9.1
+
+# ── LLM / inference ───────────────────────────────────────────────────────────
+transformers==4.41.2
+# torch is a transitive dep of sentence-transformers and transformers
+# CPU-only wheel is ~300 MB vs full GPU ~2 GB
+
+# ── Agent framework ───────────────────────────────────────────────────────────
+langgraph==0.1.5
+langchain-core==0.2.5
+
+# ── MLflow client (model loading) ────────────────────────────────────────────
+mlflow==2.13.2
+
+# ── Storage / data ────────────────────────────────────────────────────────────
+boto3==1.34.131
+psycopg2-binary==2.9.9
+redis==5.0.5
+duckdb==0.10.3
+pandas==2.2.2
+scikit-learn==1.5.0
+python-dotenv==1.0.1
+requests==2.32.3
