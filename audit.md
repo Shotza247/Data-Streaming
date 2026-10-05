@@ -316,3 +316,34 @@ SARS Tax Tables 2024, VAT Act, SARS Fraud Prevention Policy, PAYE Employer Guide
 - `docs(audit): Sub-Task 5 complete`
 
 ---
+
+## Entry 007 — Sub-Task 6: MLflow Model Training and Registry
+
+**Date:** 2026-10-02
+**Status:** ✅ COMPLETE
+
+### Files Created / Modified
+
+| File | Status | Description |
+|---|---|---|
+| `mlflow/mlflow_config.py` | NEW | Centralised config: tracking URI, S3 endpoint, experiment/model names |
+| `mlflow/train_fraud_model.py` | NEW | Full pipeline: DuckDB load → RF train → log metrics/artifacts → register |
+| `mlflow/promote_model.py` | NEW | Stage transition Staging → Production with archive of previous |
+| `mlflow/requirements.txt` | UPDATED | Pinned versions: mlflow, sklearn, pandas, numpy, matplotlib |
+| `lineage/lineage_schemas.py` | UPDATED | Added NAMESPACE_* aliases, postgres_dataset alias, _dataset() helper |
+| `Makefile` | UPDATED | Added seed-kb, train, promote targets |
+
+### ML Pipeline Summary
+- **Model**: RandomForestClassifier (n_estimators=100, max_depth=8, class_weight=balanced)
+- **Features**: province, employment_type, employment_status, filing_status (one-hot) + taxable_income
+- **Target**: is_fraud (boolean)
+- **Fallback**: Generates 500 synthetic rows if MinIO cleaned-tax is empty (demo safety net)
+- **Artifacts logged**: confusion_matrix.png, classification_report.txt, sklearn model pickle
+
+### Commits
+- `feat(mlflow): add mlflow_config.py, train_fraud_model.py, promote_model.py`
+- `fix(lineage): add NAMESPACE_* aliases, postgres_dataset alias, _dataset helper`
+- `feat(makefile): add seed-kb, train, promote targets`
+- `docs(audit): Sub-Task 6 complete`
+
+---

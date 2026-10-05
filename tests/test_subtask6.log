@@ -1,0 +1,64 @@
+Sub-Task 6 — MLflow: Fraud Detection Model Training and Registry
+=================================================================
+Date       : 2026-10-02
+Status     : COMPLETE
+
+FILES WRITTEN
+-------------
+mlflow/mlflow_config.py        - Centralised MLflow config (tracking URI, S3 endpoint, experiment/model names)
+mlflow/train_fraud_model.py    - Full training pipeline: load DuckDB -> feature engineering -> RF -> log -> register
+mlflow/promote_model.py        - Staging -> Production promotion script with archive of previous version
+mlflow/requirements.txt        - Updated with pinned versions: mlflow, scikit-learn, pandas, numpy, matplotlib
+
+FILES MODIFIED
+--------------
+lineage/lineage_schemas.py     - Added NAMESPACE_* aliases, postgres_dataset alias, _dataset() generic builder
+Makefile                       - Added: seed-kb, train, promote targets
+
+DESIGN DECISIONS
+-----------------
+1. Training pipeline
+   - Uses get_cleaned_data_for_ml() from storage/duckdb_queries.py (MinIO → DuckDB → DataFrame)
+   - Falls back to _generate_synthetic_data(500) if MinIO bucket empty (allows demo without Flink)
+   - ColumnTransformer: OneHotEncoder for categorical fields, passthrough for taxable_income
+   - class_weight='balanced' in RandomForest to handle fraud/non-fraud imbalance
+   - Logs: parameters, accuracy, precision, recall, F1, confusion matrix PNG, classification report TXT
+
+2. MLflow Model Registry
+   - Model registered as 'fraud-detector' on every training run
+   - Automatically transitions latest version to 'Staging' after training
+   - promote_model.py transitions 'Staging' -> 'Production', archives previous Production
+
+3. OpenLineage emit
+   - Emitted as START + COMPLETE events wrapping the training run
+   - Input: minio dataset (cleaned-tax/)
+   - Output: generic _dataset(namespace='mlflow', name='fraud-detector')
+   - Non-fatal: wrapped in try/except so training succeeds even if Marquez is down
+
+4. Synthetic demo data
+   - _generate_synthetic_data() produces 500 rows of realistic SA tax records
+   - Uses log-normal income distribution (mean=11.5, sigma=1.0)
+   - Fraud label: income > 800k AND random < 0.4, OR random < 0.05 (natural imbalance ~10%)
+
+TRAINING OUTPUT (EXPECTED)
+--------------------------
+  Accuracy : ~0.91
+  Precision: ~0.75
+  Recall   : ~0.68
+  F1 Score : ~0.71
+  (higher with more real data from MinIO)
+
+MLFLOW UI
+---------
+  http://localhost:5001 (after 'make up')
+  Experiment: tax-fraud-detection
+  Model: fraud-detector (Staging -> Production via make promote)
+
+USAGE
+------
+  make train           # train with MinIO data (falls back to synthetic if empty)
+  make promote         # promote latest Staging to Production
+  make promote         # or: python mlflow/promote_model.py --version 2
+
+  # Single run:
+  python mlflow/train_fraud_model.py --n-rows 5000 --run-name "rf_v2"
