@@ -351,6 +351,39 @@ SARS Tax Tables 2024, VAT Act, SARS Fraud Prevention Policy, PAYE Employer Guide
 
 ---
 
+## Entry 009 — Sub-Task 9: Wire Dashboard to Live Data
+
+**Date:** 2026-10-02
+**Status:** ✅ COMPLETE
+
+### Changes Made
+
+| File | Change |
+|---|---|
+| `dashboard/app.py` | sys.path wiring for /storage /agents /lineage mounts; st_autorefresh(30s) |
+| `dashboard/requirements.txt` | Added streamlit-autorefresh, python-dotenv |
+| `dashboard/tabs/tab_tax_kpi.py` | DuckDB functions now call `storage.duckdb_queries` module |
+| `dashboard/tabs/tab_fraud.py` | DuckDB functions now call `storage.duckdb_queries` module; `_get_top_customers()` added |
+| `dashboard/tabs/tab_mlflow.py` | `EXPERIMENT` name fixed to `tax-fraud-detection` |
+| `docker-compose.yml` | Streamlit service now mounts `/storage`, `/agents`, `/lineage`, `/mlflow_scripts` |
+
+### Live Data Wiring
+
+| Tab | Data Source | When Live |
+|---|---|---|
+| Tax KPIs | Redis tax:kpi:window:* + DuckDB cleaned-tax | After kpi-poller starts + Flink job_05 runs |
+| Fraud Intelligence | PostgreSQL fraud_detections + DuckDB province heatmap | After fraud signals populate |
+| AI Agent Chat | agents.langgraph_app.run() | After HF models downloaded |
+| Data Lineage | Marquez REST API + iframe | Always (Marquez is running) |
+| MLflow Status | MLflow REST API + Model Registry | After make train |
+
+### Commits
+- `feat(dashboard): wire all tabs to real storage/agent modules`
+- `feat(compose): mount storage agents lineage into Streamlit container`
+- `docs(audit): Sub-Task 9 complete`
+
+---
+
 ## Entry 007 — Sub-Task 6: MLflow Model Training and Registry
 
 **Date:** 2026-10-02

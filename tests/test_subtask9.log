@@ -1,0 +1,64 @@
+Sub-Task 9 — Wire Dashboard to Live Data
+==========================================
+Date       : 2026-10-02
+Status     : COMPLETE
+
+FILES MODIFIED
+--------------
+dashboard/app.py                       - sys.path setup for /storage /agents /lineage mounts; st_autorefresh(30s)
+dashboard/requirements.txt             - Added streamlit-autorefresh, python-dotenv
+dashboard/tabs/tab_tax_kpi.py          - _get_duckdb_trend() → storage.duckdb_queries.get_tax_kpi_trend()
+                                         _get_income_distribution() → storage.duckdb_queries.get_income_distribution()
+dashboard/tabs/tab_fraud.py            - _get_duckdb_fraud_summary() → storage.duckdb_queries.get_province_fraud_heatmap()
+                                         _get_top_customers() → storage.duckdb_queries.get_top_flagged_customers()
+dashboard/tabs/tab_mlflow.py           - EXPERIMENT name fixed: "fraud-detection" -> "tax-fraud-detection"
+docker-compose.yml                     - Streamlit service now mounts /storage, /agents, /lineage, /mlflow_scripts
+
+WIRING SUMMARY
+--------------
+Tab 1 (Tax KPIs):
+  - Redis: tax:kpi:window:* keys → live KPI cards  [LIVE]
+  - storage.duckdb_queries.get_tax_kpi_trend() → trend line chart  [LIVE when cleaned-tax has data]
+  - storage.duckdb_queries.get_income_distribution() → income histogram  [LIVE when cleaned-tax has data]
+
+Tab 2 (Fraud Intelligence):
+  - PostgreSQL fraud_detections table → fraud signals table  [LIVE]
+  - storage.duckdb_queries.get_province_fraud_heatmap() → province bar chart  [LIVE]
+  - storage.duckdb_queries.get_top_flagged_customers() → top customers table  [LIVE]
+
+Tab 3 (AI Agent Chat):
+  - agents.langgraph_app.run() → full multi-agent pipeline  [LIVE - requires HF model download]
+  - Demo mode fallback if langgraph_app not importable  [SAFE]
+
+Tab 4 (Data Lineage):
+  - Marquez REST API GET /api/v1/namespaces/{ns}/jobs → lineage table  [LIVE]
+  - iframe embed: http://marquez-web:3000  [LIVE]
+
+Tab 5 (MLflow Status):
+  - MLflow REST API: experiments, runs, registered model versions  [LIVE]
+  - Model stage badge from real Model Registry  [LIVE after make train]
+  - EXPERIMENT name fixed to match mlflow_config.py  [FIXED]
+
+AUTOREFRESH
+-----------
+  streamlit-autorefresh triggers a 30s page refresh for Tab 1 live KPI data.
+  Import wrapped in try/except — if pkg not installed, dashboard still works.
+
+DOCKER VOLUME MOUNTS ADDED
+---------------------------
+  - ./storage    → /storage    (storage.duckdb_queries, storage.minio_client)
+  - ./agents     → /agents     (agents.langgraph_app, agents.qdrant_search, etc.)
+  - ./lineage    → /lineage    (lineage.openlineage_client)
+  - ./mlflow     → /mlflow_scripts  (mlflow.mlflow_config for model loading)
+  sys.path in app.py adds the parent of each mount (/) so `import storage.xxx` works.
+
+FALLBACKS (all preserved)
+--------------------------
+  All 5 tabs maintain their graceful fallback to demo/mock data if the real
+  service is not yet running. No tab can crash the dashboard.
+
+TO RESTART STREAMLIT WITH UPDATED VOLUMES
+------------------------------------------
+  podman stop streamlit
+  podman rm streamlit
+  podman compose up -d streamlit
