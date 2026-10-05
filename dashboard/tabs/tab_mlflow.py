@@ -17,7 +17,7 @@ from datetime import datetime
 
 MLFLOW_URI   = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5001")
 MODEL_NAME   = "fraud-detector"
-EXPERIMENT   = "fraud-detection"
+EXPERIMENT   = "tax-fraud-detection"   # matches mlflow_config.py EXPERIMENT_NAME
 
 
 def _mlflow_healthy():

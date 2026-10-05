@@ -39,34 +39,24 @@ def _get_redis_kpis():
 
 
 def _get_duckdb_trend(n_windows=12):
-    """Query DuckDB → MinIO cleaned-tax for trend data. Returns DataFrame or None."""
+    """Query DuckDB → MinIO cleaned-tax for trend data via storage module. Returns DataFrame or None."""
     try:
-        import duckdb
-        con = duckdb.connect()
-        endpoint   = os.getenv("MINIO_ENDPOINT", "minio:9000")
-        access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-        secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-        bucket     = os.getenv("MINIO_BUCKET_CLEANED", "cleaned-tax")
+        import sys
+        sys.path.insert(0, "/app")
+        from storage.duckdb_queries import get_tax_kpi_trend
+        df = get_tax_kpi_trend(n_windows=n_windows)
+        return df if not df.empty else None
+    except Exception:
+        return None
 
-        con.execute(f"INSTALL httpfs; LOAD httpfs;")
-        con.execute(f"SET s3_endpoint='{endpoint}';")
-        con.execute(f"SET s3_access_key_id='{access_key}';")
-        con.execute(f"SET s3_secret_access_key='{secret_key}';")
-        con.execute("SET s3_use_ssl=false;")
-        con.execute("SET s3_url_style='path';")
 
-        df = con.execute(f"""
-            SELECT
-                date_trunc('hour', CAST(processed_at AS TIMESTAMP)) AS window_start,
-                COUNT(*)                                             AS total_count,
-                AVG(CAST(taxable_income AS DOUBLE))                 AS avg_income,
-                COUNT(DISTINCT customer_id)                         AS distinct_customers
-            FROM read_json_auto('s3://{bucket}/**/*.json', ignore_errors=true)
-            GROUP BY 1
-            ORDER BY 1 DESC
-            LIMIT {n_windows}
-        """).df()
-        con.close()
+def _get_income_distribution():
+    """Get income distribution data via storage module. Returns DataFrame or None."""
+    try:
+        import sys
+        sys.path.insert(0, "/app")
+        from storage.duckdb_queries import get_income_distribution
+        df = get_income_distribution(n_buckets=20)
         return df if not df.empty else None
     except Exception:
         return None
@@ -193,17 +183,23 @@ def render():
     # ── Income Distribution histogram ─────────────────────────────────────────
     st.markdown("#### Taxable Income Distribution")
 
-    if duckdb_data is not None and "avg_income" in duckdb_data.columns:
-        incomes = duckdb_data["avg_income"].dropna().tolist()
+    income_df = _get_income_distribution()
+    if income_df is not None and not income_df.empty:
+        fig2 = px.bar(
+            income_df,
+            x="bucket_label",
+            y="count",
+            labels={"bucket_label": "Income Bracket", "count": "Applications"},
+            color_discrete_sequence=["#3b82f6"],
+        )
     else:
         incomes = [round(random.gauss(55000, 18000)) for _ in range(200)]
-
-    fig2 = px.histogram(
-        x=incomes,
-        nbins=20,
-        labels={"x": "Taxable Income (ZAR)"},
-        color_discrete_sequence=["#3b82f6"],
-    )
+        fig2 = px.histogram(
+            x=incomes,
+            nbins=20,
+            labels={"x": "Taxable Income (ZAR)"},
+            color_discrete_sequence=["#3b82f6"],
+        )
     fig2.update_layout(
         height=260,
         margin=dict(l=0, r=0, t=10, b=0),

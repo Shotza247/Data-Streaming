@@ -41,33 +41,29 @@ def _get_postgres_fraud():
 
 
 def _get_duckdb_fraud_summary():
-    """Aggregate fraud signals from MinIO via DuckDB. Returns DataFrame or None."""
+    """Aggregate fraud signals from MinIO via DuckDB storage module. Returns DataFrame or None."""
     try:
-        import duckdb
-        con = duckdb.connect()
-        endpoint   = os.getenv("MINIO_ENDPOINT", "minio:9000")
-        access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-        secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-        bucket     = os.getenv("MINIO_BUCKET_CLEANED", "cleaned-tax")
+        import sys
+        sys.path.insert(0, "/app")
+        from storage.duckdb_queries import get_province_fraud_heatmap
+        df = get_province_fraud_heatmap()
+        # Rename columns to match what the rest of this tab expects
+        if not df.empty:
+            df = df.rename(columns={
+                "total_applications": "application_count",
+            })
+        return df if not df.empty else None
+    except Exception:
+        return None
 
-        con.execute("INSTALL httpfs; LOAD httpfs;")
-        con.execute(f"SET s3_endpoint='{endpoint}';")
-        con.execute(f"SET s3_access_key_id='{access_key}';")
-        con.execute(f"SET s3_secret_access_key='{secret_key}';")
-        con.execute("SET s3_use_ssl=false;")
-        con.execute("SET s3_url_style='path';")
 
-        df = con.execute(f"""
-            SELECT
-                province,
-                COUNT(*) AS application_count,
-                SUM(CASE WHEN is_fraud = true THEN 1 ELSE 0 END) AS fraud_count,
-                ROUND(AVG(CAST(taxable_income AS DOUBLE)), 0) AS avg_income
-            FROM read_json_auto('s3://{bucket}/**/*.json', ignore_errors=true)
-            GROUP BY province
-            ORDER BY fraud_count DESC
-        """).df()
-        con.close()
+def _get_top_customers():
+    """Return top flagged customers via DuckDB storage module."""
+    try:
+        import sys
+        sys.path.insert(0, "/app")
+        from storage.duckdb_queries import get_top_flagged_customers
+        df = get_top_flagged_customers(top_n=10)
         return df if not df.empty else None
     except Exception:
         return None
@@ -193,7 +189,10 @@ def render():
     # ── Top flagged customers table ───────────────────────────────────────────
     st.markdown("#### Top Flagged Customers")
 
-    if "customer_id" in fraud_df.columns:
+    live_top_customers = _get_top_customers()
+    if live_top_customers is not None and not live_top_customers.empty:
+        top_customers = live_top_customers
+    elif "customer_id" in fraud_df.columns:
         top_customers = (
             fraud_df.groupby("customer_id")
             .agg(signal_count=("signal_type", "count"),
