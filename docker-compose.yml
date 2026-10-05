@@ -286,6 +286,11 @@ services:
       - "8501:8501"
     volumes:
       - ./dashboard:/app
+      # Mount project modules so dashboard can import storage/, agents/, lineage/
+      - ./storage:/storage
+      - ./agents:/agents
+      - ./lineage:/lineage
+      - ./mlflow:/mlflow_scripts
     environment:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       POSTGRES_HOST: ${POSTGRES_HOST}
