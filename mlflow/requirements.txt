@@ -1,4 +1,13 @@
-mlflow
-scikit-learn
-pandas
-boto3
+# mlflow/requirements.txt
+# Dependencies for MLflow model training and promotion scripts.
+
+mlflow==2.13.2
+scikit-learn==1.5.0
+pandas==2.2.2
+numpy==1.26.4
+boto3==1.34.131
+psycopg2-binary==2.9.9
+duckdb==0.10.3
+python-dotenv==1.0.1
+requests==2.32.3
+matplotlib==3.9.0
