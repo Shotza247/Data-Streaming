@@ -26,7 +26,7 @@ CONTAINER_CLI := podman
         submit-sql submit-job \
         kpi-poller-up kpi-poller-logs \
         seed seed-kb train promote \
-        smoke-test reset
+        smoke-test verify-lineage reset
 
 # Sync build-context files into docker/ then start all services
 up: _sync-docker-context
@@ -121,9 +121,13 @@ train:
 promote:
 	python mlflow/promote_model.py
 
-# Run the integration smoke test
+# Run the integration smoke test (includes lineage verification)
 smoke-test:
 	python scripts/smoke_test.py
+
+# Verify Marquez lineage DAG only
+verify-lineage:
+	python lineage/verify_lineage.py
 
 # Full reset: wipe all volumes and restart from scratch
 reset:
