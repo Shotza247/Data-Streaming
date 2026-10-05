@@ -234,3 +234,28 @@ ENRICHED_APPLICATIONS_FIELDS = TAX_APPLICATIONS_FIELDS + [
     {"name": "flagged_previously",       "type": "BOOLEAN"},
     {"name": "processed_at",             "type": "TIMESTAMP"},
 ]
+
+# ── Public namespace aliases (for callers that use NAMESPACE_* names) ─────────
+NAMESPACE_KAFKA      = NS_KAFKA
+NAMESPACE_MINIO      = NS_MINIO
+NAMESPACE_POSTGRES   = NS_POSTGRES
+NAMESPACE_DUCKDB     = NS_DUCKDB
+NAMESPACE_MLFLOW     = NS_MLFLOW
+NAMESPACE_REDIS      = NS_REDIS
+NAMESPACE_STREAMLIT  = NS_STREAMLIT
+NAMESPACE_FLINK      = "flink"
+
+# ── Alias: postgres_dataset → pg_dataset ─────────────────────────────────────
+postgres_dataset = pg_dataset
+
+
+def _dataset(namespace: str, name: str, facets: dict | None = None) -> dict:
+    """
+    Generic dataset builder for any namespace/name combination.
+    Used when no typed helper exists (e.g. mlflow model output in train scripts).
+    """
+    return {
+        "namespace": namespace,
+        "name":      name,
+        "facets":    facets or {},
+    }

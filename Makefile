@@ -25,7 +25,8 @@ CONTAINER_CLI := podman
         flink-up flink-logs flink-ui \
         submit-sql submit-job \
         kpi-poller-up kpi-poller-logs \
-        seed smoke-test reset
+        seed seed-kb train promote \
+        smoke-test reset
 
 # Sync build-context files into docker/ then start all services
 up: _sync-docker-context
@@ -104,13 +105,21 @@ kpi-poller-logs:
 
 # ── Seeding and testing ───────────────────────────────────────────────────────
 
-# Preflight: ensure cleaned-tax bucket is non-empty, then seed Qdrant
+# Seed Qdrant collections (regulatory KB always; fraud_similarity requires cleaned-tax data)
 seed:
-	@if ! python scripts/preflight_bucket_check.py "$(MINIO_BUCKET_CLEANED)" 2>/dev/null; then \
-		echo "Run 'make submit-sql' and wait for cleaned-tax records before seeding Qdrant"; \
-		exit 1; \
-	fi
 	python scripts/seed_qdrant.py
+
+# Seed only the regulatory KB (safe to run immediately, no MinIO dependency)
+seed-kb:
+	python scripts/seed_qdrant.py --kb-only
+
+# Train the MLflow fraud detection model
+train:
+	python mlflow/train_fraud_model.py
+
+# Promote the latest Staging model to Production
+promote:
+	python mlflow/promote_model.py
 
 # Run the integration smoke test
 smoke-test:
