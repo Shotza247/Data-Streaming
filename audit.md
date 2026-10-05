@@ -317,6 +317,40 @@ SARS Tax Tables 2024, VAT Act, SARS Fraud Prevention Policy, PAYE Employer Guide
 
 ---
 
+## Entry 008 — Sub-Task 7: LangGraph Multi-Agent System
+
+**Date:** 2026-10-02
+**Status:** ✅ COMPLETE
+
+### Files Created
+
+| File | Description |
+|---|---|
+| `agents/llm_wrapper.py` | flan-t5-base pipeline singleton; generate(); classify_intent() heuristic router |
+| `agents/supervisor.py` | Keyword-based routing node → fraud_check or tax_question |
+| `agents/fraud_agent.py` | MLflow inference + Qdrant similarity → structured JSON fraud assessment |
+| `agents/qa_agent.py` | Qdrant KB retrieval + RAG prompt → flan-t5-base generated answer |
+| `agents/langgraph_app.py` | StateGraph: supervisor → fraud_agent/qa_agent; compile_graph(); run() |
+
+### Graph Topology
+```
+[START] → supervisor → {fraud_check: fraud_agent, tax_question: qa_agent} → [END]
+```
+
+### Key Design Choices
+- **Routing**: heuristic keyword matching (no LLM call) — deterministic, fast
+- **Fraud agent fallback**: if MLflow model unavailable, uses Qdrant similarity score alone
+- **Q&A agent fallback**: if LLM unavailable, returns raw KB chunk text
+- **run()**: always returns a dict — never raises; all errors caught and formatted
+
+### Commits
+- `feat(agents): add llm_wrapper.py flan-t5-base pipeline utility`
+- `feat(agents): add supervisor, fraud_agent, qa_agent LangGraph nodes`
+- `feat(agents): add langgraph_app.py StateGraph with conditional routing`
+- `docs(audit): Sub-Task 7 complete`
+
+---
+
 ## Entry 007 — Sub-Task 6: MLflow Model Training and Registry
 
 **Date:** 2026-10-02

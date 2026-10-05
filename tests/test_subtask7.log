@@ -1,0 +1,89 @@
+Sub-Task 7 — LangGraph Multi-Agent System
+==========================================
+Date       : 2026-10-02
+Status     : COMPLETE
+
+FILES WRITTEN
+-------------
+agents/llm_wrapper.py         - google/flan-t5-base pipeline singleton, generate(), classify_intent()
+agents/supervisor.py          - Keyword-routing supervisor node (fraud_check vs tax_question)
+agents/fraud_agent.py         - MLflow model inference + Qdrant similarity → structured JSON response
+agents/qa_agent.py            - Qdrant KB retrieval + RAG prompt → flan-t5-base generated answer
+agents/langgraph_app.py       - StateGraph assembly, conditional edges, compile_graph(), run()
+
+ARCHITECTURE
+------------
+                [START]
+                   |
+              supervisor_node
+                   |
+        ┌──────────┴──────────┐
+        | fraud_check          | tax_question
+        ↓                      ↓
+  fraud_agent_node       qa_agent_node
+        |                      |
+       [END]                  [END]
+
+STATE SCHEMA
+------------
+  input             str         Raw user input
+  intent            str         "fraud_check" | "tax_question"
+  next              str         Router output from supervisor
+  application_dict  dict|None   Parsed application (fraud path)
+  question          str|None    Cleaned question (Q&A path)
+  response          str         Final formatted response
+  sources           list[str]   Source references (KB sections or Qdrant IDs)
+
+ROUTING LOGIC (supervisor.py)
+------------------------------
+Keyword-based (no LLM call, deterministic):
+  Fraud keywords: fraud, suspicious, risk, investigate, APP-, application_id, flag, anomaly, pattern
+  → "fraud_check" → fraud_agent
+  Everything else → "tax_question" → qa_agent
+
+FRAUD AGENT FLOW
+-----------------
+  1. Load fraud-detector model from MLflow (Production → Staging → None fallback)
+  2. Build feature DataFrame: province, taxable_income, employment_type, employment_status, filing_status
+  3. model.predict_proba() → fraud_probability (0.0-1.0)
+  4. search_similar_fraud(app_dict, top_k=5) from Qdrant fraud_similarity
+  5. Recommendation thresholds: >=0.75 HIGH, >=0.45 MEDIUM, <0.45 LOW
+  6. Response: JSON with application_id, fraud_probability, recommendation, similar_cases
+
+Q&A AGENT FLOW
+--------------
+  1. search_regulatory_kb(question, top_k=3) from Qdrant regulatory_kb
+  2. format_kb_context(results) → context string with source annotations
+  3. Build RAG prompt: "You are a SA tax assistant. Context: ... Question: ... Answer:"
+  4. generate(prompt) via flan-t5-base text2text pipeline
+  5. Fallback: return most relevant KB chunk directly if LLM unavailable
+  6. Response: answer + "Sources: [doc §section]" list
+
+GRACEFUL DEGRADATION
+---------------------
+  - MLflow model unavailable → skip inference, use Qdrant similarity only
+  - Qdrant unavailable → skip similarity, model-only response
+  - LLM unavailable → return raw KB chunk as fallback answer
+  - LangGraph import error → run() returns formatted error message
+  - All agent errors wrapped in try/except → never crashes the dashboard
+
+SMOKE TEST COMMANDS
+-------------------
+# From within the streamlit container or with deps installed:
+python agents/langgraph_app.py
+
+# Expected output for each test input:
+[Q] What is the penalty rate for late filing?
+[intent] tax_question
+[A] Based on Tax_Administration_Act_28_2011 §25: Late filing attracts R250/month up to R16000...
+
+[Q] Check application APP-001 for fraud
+[intent] fraud_check
+[A] {"application_id": "APP-001", "fraud_probability": 0.12, "recommendation": "LOW RISK..."
+
+NOTES
+------
+- flan-t5-base downloads ~250MB on first run inside container
+- Set HF_MODEL_LLM env var to use a different model (e.g. google/flan-t5-small for 80MB)
+- LangGraph v0.1.x API used: StateGraph, add_conditional_edges, set_entry_point
+- The compiled graph is cached in memory per process (not serialised to disk)
