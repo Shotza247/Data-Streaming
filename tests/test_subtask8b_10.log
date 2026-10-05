@@ -1,0 +1,75 @@
+Sub-Task 8B + Sub-Task 10 — Lineage Verification, Smoke Tests, DEMO.md
+======================================================================
+Date       : 2026-10-02
+Status     : COMPLETE
+
+FILES WRITTEN
+-------------
+lineage/verify_lineage.py     - Marquez API check: lists all namespaces, jobs, datasets; validates expected jobs registered
+scripts/smoke_test.py         - 8-component integration smoke test with critical/non-critical classification
+DEMO.md                       - 10-step walkthrough from cold start to live dashboard
+
+FILES MODIFIED
+--------------
+Makefile                      - Added smoke-test, verify-lineage targets; updated .PHONY list
+
+SMOKE TEST COMPONENTS
+---------------------
+Component               Critical?  What it checks
+-------------------------------------------------
+Kafka Topics            YES        4 topics exist (tax-applications, taxpayer-profiles, fraud-signals, audit-events)
+PostgreSQL Tables       YES        4 tables exist and have rows (or warns if empty)
+Redis KPI Cache         YES        Redis ping + tax:kpi:* key scan
+MinIO Buckets           YES        raw-tax, cleaned-tax, mlflow-artifacts bucket_has_files()
+Qdrant Collections      NO         fraud_similarity + regulatory_kb exist and have vectors
+Marquez Lineage DAG     NO         All 6 expected jobs registered (5 Flink + 1 MLflow)
+MLflow Model Registry   NO         fraud-detector model registered
+Streamlit Dashboard     NO         HTTP /healthz at localhost:8501
+
+LINEAGE VERIFY
+--------------
+lineage/verify_lineage.py checks all NAMESPACES_TO_CHECK = [flink, mlflow, kafka, minio, postgres, duckdb, redis]
+Prints per-namespace job + dataset table.
+Validates minimum set of expected jobs:
+  flink/job_01_raw_to_minio
+  flink/job_02_enrich
+  flink/job_03_kpi_windows
+  flink/job_04_fraud_pattern
+  flink/job_05_cleaned
+  mlflow/train_fraud_model
+
+DEMO.md COVERAGE
+----------------
+10 steps:
+  1. Start platform (make up)
+  2. Create topics + start producers (make init-topics + make producers-up)
+  3. Build Flink image + start cluster (podman build + make flink-up)
+  4. Submit Flink SQL jobs (make submit-sql)
+  5. Start KPI poller (make kpi-poller-up)
+  6. Seed Qdrant (make seed-kb + make seed)
+  7. Train MLflow model (make train + make promote)
+  8. Explore Streamlit Dashboard (all 5 tabs with example queries)
+  9. Run smoke test (make smoke-test)
+  10. Explore Marquez lineage graph
+
+MAKEFILE TARGETS SUMMARY (FINAL)
+----------------------------------
+make up                  # Start full stack
+make down                # Stop all containers
+make init-topics         # Create Kafka topics
+make producers-up        # Start 4 producers
+make producers-down      # Stop producers
+make producers-logs      # Follow producer logs
+make flink-up            # Start Flink cluster + SQL client
+make flink-logs          # Follow Flink logs
+make submit-sql          # Submit all 5 Flink SQL jobs
+make submit-job JOB=X    # Submit single job by name
+make kpi-poller-up       # Start KPI cache poller
+make kpi-poller-logs     # Follow poller logs
+make seed                # Seed both Qdrant collections
+make seed-kb             # Seed regulatory KB only
+make train               # Train MLflow fraud model
+make promote             # Promote Staging -> Production
+make smoke-test          # Full integration test
+make verify-lineage      # Check Marquez DAG only
+make reset               # Wipe volumes + restart

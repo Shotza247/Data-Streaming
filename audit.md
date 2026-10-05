@@ -384,6 +384,44 @@ SARS Tax Tables 2024, VAT Act, SARS Fraud Prevention Policy, PAYE Employer Guide
 
 ---
 
+## Entry 010 — Sub-Task 8B + Sub-Task 10: Lineage Verification, Smoke Tests, DEMO.md
+
+**Date:** 2026-10-02
+**Status:** ✅ COMPLETE — ALL SUB-TASKS DONE
+
+### Files Created
+
+| File | Description |
+|---|---|
+| `lineage/verify_lineage.py` | Marquez API check: namespaces, jobs, datasets; validates 6 expected jobs |
+| `scripts/smoke_test.py` | 8-component integration smoke test (4 critical, 4 non-critical) |
+| `DEMO.md` | 10-step walkthrough from cold start to live dashboard with architecture diagram |
+
+### Smoke Test Coverage
+
+| Component | Critical | What It Checks |
+|---|---|---|
+| Kafka Topics | YES | 4 topics exist |
+| PostgreSQL Tables | YES | 4 tables exist and have rows |
+| Redis KPI Cache | YES | Ping + tax:kpi:* key scan |
+| MinIO Buckets | YES | raw-tax, cleaned-tax, mlflow-artifacts have files |
+| Qdrant Collections | NO | Both collections have vectors |
+| Marquez Lineage DAG | NO | 6 expected jobs registered |
+| MLflow Model Registry | NO | fraud-detector registered |
+| Streamlit Dashboard | NO | HTTP healthcheck |
+
+### Final Makefile Targets
+All 16 targets documented in DEMO.md and tests/test_subtask8b_10.log.
+
+### Commits
+- `feat(lineage): add verify_lineage.py Marquez DAG verification`
+- `feat(scripts): add smoke_test.py 8-component integration test`
+- `feat(docs): add DEMO.md 10-step platform walkthrough`
+- `feat(makefile): add verify-lineage target`
+- `docs(audit): all sub-tasks complete`
+
+---
+
 ## Entry 007 — Sub-Task 6: MLflow Model Training and Registry
 
 **Date:** 2026-10-02
