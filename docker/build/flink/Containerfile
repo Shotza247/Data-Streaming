@@ -24,7 +24,7 @@ RUN wget -q -O /opt/flink/lib/flink-sql-connector-kafka-3.1.0-1.18.jar \
 RUN wget -q -O /opt/flink/lib/flink-connector-jdbc-3.1.2-1.18.jar \
     "https://repo1.maven.org/maven2/org/apache/flink/flink-connector-jdbc-3.1.2-1.18/flink-connector-jdbc-3.1.2-1.18.jar"
 
-# ── Flink S3 filesystem connector for MinIO ───────────────────────────────────
+# ── Flink S3 filesystem connector for MinIO (s3a:// scheme) ──────────────────
 RUN wget -q -O /opt/flink/lib/flink-s3-fs-hadoop-1.18.1.jar \
     "https://repo1.maven.org/maven2/org/apache/flink/flink-s3-fs-hadoop-1.18.1/flink-s3-fs-hadoop-1.18.1.jar"
 
@@ -37,3 +37,14 @@ RUN ls -lh /opt/flink/lib/flink-sql-connector-kafka-3.1.0-1.18.jar \
     && ls -lh /opt/flink/lib/flink-connector-jdbc-3.1.2-1.18.jar \
     && ls -lh /opt/flink/lib/flink-s3-fs-hadoop-1.18.1.jar \
     && ls -lh /opt/flink/lib/postgresql-42.7.3.jar
+
+# ── Bake MinIO / S3 config into flink-conf.yaml ──────────────────────────────
+# These values are overridable at runtime via FLINK_PROPERTIES env var.
+# s3.endpoint and credentials are set here as defaults; override per-container.
+RUN echo "\n\
+# MinIO S3 config (overridden by FLINK_PROPERTIES at runtime)\n\
+s3.endpoint: http://minio:9000\n\
+s3.access-key: minioadmin\n\
+s3.secret-key: minioadmin\n\
+s3.path.style.access: true\n\
+" >> /opt/flink/conf/flink-conf.yaml

@@ -21,8 +21,10 @@ NAMESPACES  = ["kafka", "minio", "postgres", "duckdb", "mlflow"]
 
 
 def _marquez_healthy():
+    # NOTE: Marquez v0.47 does not expose /api/v1/health (returns 404).
+    # Use /api/v1/namespaces which always returns 200 when the API is up.
     try:
-        r = requests.get(f"{MARQUEZ_API}/api/v1/health", timeout=3)
+        r = requests.get(f"{MARQUEZ_API}/api/v1/namespaces", timeout=3)
         return r.status_code == 200
     except Exception:
         return False
@@ -169,3 +171,4 @@ def render():
 
     if st.button("🔄 Refresh Lineage"):
         st.rerun()
+

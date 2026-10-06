@@ -61,10 +61,11 @@ services:
   flink-jobmanager:
     build:
       context: ./docker/build/flink
+    image: flink-custom:1.18
     container_name: flink-jobmanager
     depends_on:
       - kafka
-      - zookeeper
+      - minio
     ports:
       - "8081:8081"
     environment:
@@ -72,19 +73,30 @@ services:
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
         jobmanager.rpc.port: 6123
-        jobmanager.memory.process.size: 512m
+        jobmanager.memory.process.size: 1024m
         taskmanager.memory.process.size: 1024m
-        taskmanager.numberOfTaskSlots: 2
-        parallel.default: 1
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 1
+        s3.endpoint: http://minio:9000
+        s3.access-key: ${MINIO_ACCESS_KEY}
+        s3.secret-key: ${MINIO_SECRET_KEY}
+        s3.path.style.access: true
     volumes:
       - ./flink-jobs:/opt/flink/jobs
     command: jobmanager
     networks:
       - streaming-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/overview"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 30s
 
   flink-taskmanager:
     build:
       context: ./docker/build/flink
+    image: flink-custom:1.18
     container_name: flink-taskmanager
     depends_on:
       - flink-jobmanager
@@ -93,10 +105,14 @@ services:
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
         jobmanager.rpc.port: 6123
-        jobmanager.memory.process.size: 512m
+        jobmanager.memory.process.size: 1024m
         taskmanager.memory.process.size: 1024m
-        taskmanager.numberOfTaskSlots: 2
-        parallel.default: 1
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 1
+        s3.endpoint: http://minio:9000
+        s3.access-key: ${MINIO_ACCESS_KEY}
+        s3.secret-key: ${MINIO_SECRET_KEY}
+        s3.path.style.access: true
     volumes:
       - ./flink-jobs:/opt/flink/jobs
     command: taskmanager
@@ -106,14 +122,20 @@ services:
   flink-sql-client:
     build:
       context: ./docker/build/flink
+    image: flink-custom:1.18
     container_name: flink-sql-client
     depends_on:
-      - flink-jobmanager
+      flink-jobmanager:
+        condition: service_healthy
     environment:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
         jobmanager.rpc.port: 6123
+        s3.endpoint: http://minio:9000
+        s3.access-key: ${MINIO_ACCESS_KEY}
+        s3.secret-key: ${MINIO_SECRET_KEY}
+        s3.path.style.access: true
     # Keep the container alive so submit_flink_jobs.py can exec into it
     entrypoint: ["tail", "-f", "/dev/null"]
     volumes:
