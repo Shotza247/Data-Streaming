@@ -3,6 +3,10 @@ runOnSave = true
 port = 8501
 address = "0.0.0.0"
 
+[logger]
+# Suppress deprecation-only warnings so container logs stay clean
+level = "error"
+
 [theme]
 primaryColor         = "#2563eb"
 backgroundColor      = "#ffffff"

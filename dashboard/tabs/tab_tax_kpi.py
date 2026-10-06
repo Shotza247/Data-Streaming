@@ -108,45 +108,53 @@ def render():
         total_count        = int(latest.get("total_count", 0))
         avg_income         = float(latest.get("avg_income", 0))
         distinct_customers = int(latest.get("distinct_customers", 0))
-        window_label       = latest.get("window_start", "—")
+        window_label       = str(latest.get("window_start", "—"))
     else:
         total_count        = "—"
         avg_income         = "—"
         distinct_customers = "—"
         window_label       = "demo mode"
 
-    # Format helpers — only apply number formatting when the value is numeric
-    def _fmt_int(v):
-        return f"{v:,}" if isinstance(v, int) else v
-
-    def _fmt_income(v):
-        return f"R {v:,.0f}" if isinstance(v, float) else v
+    # Pre-compute display strings — avoids complex expressions inside f-strings
+    # which trigger ValueError in Python 3.11 f-string parser
+    total_count_str    = "{:,}".format(total_count) if isinstance(total_count, int) else str(total_count)
+    avg_income_str     = "R {:,.0f}".format(avg_income) if isinstance(avg_income, float) else str(avg_income)
+    customers_str      = "{:,}".format(distinct_customers) if isinstance(distinct_customers, int) else str(distinct_customers)
+    status_icon        = "&#128994;" if redis_data else "&#128993;"   # green / yellow circle (no emoji literals)
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-value">{_fmt_int(total_count)}</div>
-            <div class="kpi-label">Applications (last window)</div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kpi-card">'
+            '<div class="kpi-value">' + total_count_str + '</div>'
+            '<div class="kpi-label">Applications (last window)</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     with c2:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-value">{_fmt_income(avg_income)}</div>
-            <div class="kpi-label">Avg Taxable Income</div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kpi-card">'
+            '<div class="kpi-value">' + avg_income_str + '</div>'
+            '<div class="kpi-label">Avg Taxable Income</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     with c3:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-value">{_fmt_int(distinct_customers)}</div>
-            <div class="kpi-label">Distinct Customers</div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kpi-card">'
+            '<div class="kpi-value">' + customers_str + '</div>'
+            '<div class="kpi-label">Distinct Customers</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     with c4:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-value">{'🟢' if redis_data else '🟡'}</div>
-            <div class="kpi-label">Window: {window_label}</div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="kpi-card">'
+            '<div class="kpi-value">' + status_icon + '</div>'
+            '<div class="kpi-label">Window: ' + window_label + '</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -215,3 +223,4 @@ def render():
     if st.button("🔄 Refresh KPIs"):
         st.rerun()
     st.caption("Auto-refreshes every 30 seconds when data is live.")
+

@@ -24,7 +24,13 @@ for _p in [_project_root, "/", "/app", "/storage/..", "/agents/.."]:
         pass
 
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh  # noqa: F401 — triggers 30s refresh
+
+# ── Optional autorefresh — import guarded so missing package never crashes app ─
+try:
+    from streamlit_autorefresh import st_autorefresh as _st_autorefresh
+    _AUTOREFRESH_AVAILABLE = True
+except ImportError:
+    _AUTOREFRESH_AVAILABLE = False
 
 st.set_page_config(
     page_title="Tax Analytics Platform",
@@ -63,10 +69,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Auto-refresh every 30 seconds (fires for Tab 1 KPI live data) ─────────────
-try:
-    count = st_autorefresh(interval=30_000, key="kpi_autorefresh")
-except Exception:
-    pass  # streamlit-autorefresh not installed — graceful skip
+if _AUTOREFRESH_AVAILABLE:
+    try:
+        _st_autorefresh(interval=30_000, key="kpi_autorefresh")
+    except Exception:
+        pass
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown('<div class="main-header">&#127963;&#65039; Real-Time Tax Analytics Platform</div>', unsafe_allow_html=True)

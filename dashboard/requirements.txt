@@ -1,5 +1,7 @@
 streamlit>=1.35.0
-streamlit-autorefresh>=1.0.1
+# streamlit-autorefresh is optional — app works without it (falls back gracefully)
+# Uncomment below to enable 30-second auto-refresh on the Tax KPIs tab:
+# streamlit-autorefresh>=1.0.1
 redis>=5.0.0
 psycopg2-binary>=2.9.9
 duckdb>=0.10.0

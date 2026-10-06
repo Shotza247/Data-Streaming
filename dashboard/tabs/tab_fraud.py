@@ -19,6 +19,7 @@ def _get_postgres_fraud():
     """Fetch recent fraud detections from PostgreSQL. Returns DataFrame or None."""
     try:
         import psycopg2
+        import psycopg2.extras
         conn = psycopg2.connect(
             host=os.getenv("POSTGRES_HOST", "postgres"),
             port=int(os.getenv("POSTGRES_PORT", 5432)),
@@ -27,15 +28,21 @@ def _get_postgres_fraud():
             password=os.getenv("POSTGRES_PASSWORD", "taxpass"),
             connect_timeout=3,
         )
-        df = pd.read_sql("""
-            SELECT application_id, customer_id, signal_type, severity,
-                   detected_at, description
-            FROM fraud_detections
-            ORDER BY detected_at DESC
-            LIMIT 100
-        """, conn)
+        # Use cursor directly to avoid pandas UserWarning about DBAPI2 connections
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT application_id, customer_id, signal_type, severity,
+                       detected_at::text AS detected_at, description
+                FROM fraud_detections
+                ORDER BY detected_at DESC
+                LIMIT 100
+            """)
+            rows = cur.fetchall()
         conn.close()
-        return df if not df.empty else None
+        if not rows:
+            return None
+        df = pd.DataFrame([dict(r) for r in rows])
+        return df
     except Exception:
         return None
 
@@ -221,3 +228,4 @@ def render():
 
     if st.button("🔄 Refresh Fraud Data"):
         st.rerun()
+
