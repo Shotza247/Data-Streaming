@@ -45,9 +45,10 @@ from lineage.lineage_schemas import (
 FLINK_JOBS_DIR  = Path(__file__).parent.parent / "flink-jobs"
 CONTAINER_CLI   = os.getenv("CONTAINER_CLI", "podman")
 SQL_CLIENT_CTR  = "flink-sql-client"
-MARQUEZ_URL     = os.getenv("MARQUEZ_URL", "http://localhost:5000")
+MARQUEZ_URL     = os.getenv("MARQUEZ_API_URL", os.getenv("MARQUEZ_URL", "http://localhost:5000"))
+LINEAGE_URL     = f"{MARQUEZ_URL}/api/v1/lineage"
 
-lineage = LineageClient(marquez_url=MARQUEZ_URL, namespace=NAMESPACE_FLINK)
+lineage = LineageClient(producer_url=LINEAGE_URL)
 
 # ── Per-job lineage metadata ──────────────────────────────────────────────────
 JOB_LINEAGE = {
@@ -108,6 +109,7 @@ def submit_job(sql_file: Path) -> bool:
     # ── Emit START lineage event ───────────────────────────────────────────────
     lineage.start(
         job_name=job_name,
+        namespace=NAMESPACE_FLINK,
         run_id=run_id,
         inputs=meta["inputs"],
         outputs=meta["outputs"],
@@ -140,7 +142,7 @@ def submit_job(sql_file: Path) -> bool:
             raise RuntimeError(result.stderr.decode())
     except Exception as exc:
         print(f"  [ERROR] Failed to write SQL to container: {exc}")
-        lineage.fail(job_name=job_name, run_id=run_id,
+        lineage.fail(run_id=run_id, job_name=job_name, namespace=NAMESPACE_FLINK,
                      inputs=meta["inputs"], outputs=meta["outputs"])
         return False
 
@@ -165,7 +167,7 @@ def submit_job(sql_file: Path) -> bool:
         if result.returncode != 0:
             print(f"  [FAIL]  exit={result.returncode}  ({elapsed}s)")
             print(f"  stderr: {stderr[:500]}")
-            lineage.fail(job_name=job_name, run_id=run_id,
+            lineage.fail(run_id=run_id, job_name=job_name, namespace=NAMESPACE_FLINK,
                          inputs=meta["inputs"], outputs=meta["outputs"])
             return False
 
@@ -175,18 +177,18 @@ def submit_job(sql_file: Path) -> bool:
             if jid:
                 print(f"  Flink JobID: {jid.group(1)}")
 
-        lineage.complete(job_name=job_name, run_id=run_id,
+        lineage.complete(run_id=run_id, job_name=job_name, namespace=NAMESPACE_FLINK,
                          inputs=meta["inputs"], outputs=meta["outputs"])
         return True
 
     except subprocess.TimeoutExpired:
         print(f"  [TIMEOUT] after 120s")
-        lineage.fail(job_name=job_name, run_id=run_id,
+        lineage.fail(run_id=run_id, job_name=job_name, namespace=NAMESPACE_FLINK,
                      inputs=meta["inputs"], outputs=meta["outputs"])
         return False
     except Exception as exc:
         print(f"  [ERROR] {exc}")
-        lineage.fail(job_name=job_name, run_id=run_id,
+        lineage.fail(run_id=run_id, job_name=job_name, namespace=NAMESPACE_FLINK,
                      inputs=meta["inputs"], outputs=meta["outputs"])
         return False
 

@@ -12,25 +12,35 @@
 
 FROM apache/flink:1.18
 
+# ── Point Hadoop to Flink's conf dir so core-site.xml is found ───────────────
+# flink-s3-fs-hadoop (Hadoop S3A) reads fs.s3a.* properties from Hadoop config
+# files. Setting HADOOP_CONF_DIR to Flink's conf dir means core-site.xml there
+# will be picked up without needing a full Hadoop installation.
+ENV HADOOP_CONF_DIR=/opt/flink/conf
+
 # Install wget if not present (Flink image is Debian-based)
 RUN apt-get update && apt-get install -y --no-install-recommends wget \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Flink SQL Kafka connector (must match Flink 1.18) ────────────────────────
+# Maven path: groupId=org.apache.flink, artifactId=flink-sql-connector-kafka, version=3.1.0-1.18
 RUN wget -q -O /opt/flink/lib/flink-sql-connector-kafka-3.1.0-1.18.jar \
-    "https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka-3.1.0-1.18/flink-sql-connector-kafka-3.1.0-1.18.jar"
+    "https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.1.0-1.18/flink-sql-connector-kafka-3.1.0-1.18.jar"
 
 # ── Flink JDBC connector ──────────────────────────────────────────────────────
+# Maven path: groupId=org.apache.flink, artifactId=flink-connector-jdbc, version=3.1.2-1.18
 RUN wget -q -O /opt/flink/lib/flink-connector-jdbc-3.1.2-1.18.jar \
-    "https://repo1.maven.org/maven2/org/apache/flink/flink-connector-jdbc-3.1.2-1.18/flink-connector-jdbc-3.1.2-1.18.jar"
+    "https://repo1.maven.org/maven2/org/apache/flink/flink-connector-jdbc/3.1.2-1.18/flink-connector-jdbc-3.1.2-1.18.jar"
 
 # ── Flink S3 filesystem connector for MinIO (s3a:// scheme) ──────────────────
+# Maven path: groupId=org.apache.flink, artifactId=flink-s3-fs-hadoop, version=1.18.1
 RUN wget -q -O /opt/flink/lib/flink-s3-fs-hadoop-1.18.1.jar \
-    "https://repo1.maven.org/maven2/org/apache/flink/flink-s3-fs-hadoop-1.18.1/flink-s3-fs-hadoop-1.18.1.jar"
+    "https://repo1.maven.org/maven2/org/apache/flink/flink-s3-fs-hadoop/1.18.1/flink-s3-fs-hadoop-1.18.1.jar"
 
 # ── PostgreSQL JDBC driver ────────────────────────────────────────────────────
+# Maven path: groupId=org.postgresql, artifactId=postgresql, version=42.7.3
 RUN wget -q -O /opt/flink/lib/postgresql-42.7.3.jar \
-    "https://repo1.maven.org/maven2/org/postgresql/postgresql-42.7.3/postgresql-42.7.3.jar"
+    "https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.3/postgresql-42.7.3.jar"
 
 # Verify all JARs landed correctly
 RUN ls -lh /opt/flink/lib/flink-sql-connector-kafka-3.1.0-1.18.jar \
@@ -38,13 +48,40 @@ RUN ls -lh /opt/flink/lib/flink-sql-connector-kafka-3.1.0-1.18.jar \
     && ls -lh /opt/flink/lib/flink-s3-fs-hadoop-1.18.1.jar \
     && ls -lh /opt/flink/lib/postgresql-42.7.3.jar
 
-# ── Bake MinIO / S3 config into flink-conf.yaml ──────────────────────────────
-# These values are overridable at runtime via FLINK_PROPERTIES env var.
-# s3.endpoint and credentials are set here as defaults; override per-container.
-RUN echo "\n\
-# MinIO S3 config (overridden by FLINK_PROPERTIES at runtime)\n\
+# ── Bake cluster + S3 config into flink-conf.yaml ────────────────────────────
+# FLINK_PROPERTIES env var is merged at container startup by the official
+# Flink Docker entrypoint — it ADDS/overrides keys in flink-conf.yaml.
+# However the embedded SQL gateway reads flink-conf.yaml at its own startup,
+# so we also bake in the jobmanager address here as a safe default.
+# All values can still be overridden per-container via FLINK_PROPERTIES.
+RUN printf '\n\
+# Cluster connectivity (overridden by FLINK_PROPERTIES at runtime)\n\
+jobmanager.rpc.address: flink-jobmanager\n\
+jobmanager.rpc.port: 6123\n\
+rest.address: flink-jobmanager\n\
+rest.port: 8081\n\
+# MinIO S3 config — Flink native S3 keys (flink-s3-fs-hadoop plugin)\n\
 s3.endpoint: http://minio:9000\n\
 s3.access-key: minioadmin\n\
 s3.secret-key: minioadmin\n\
 s3.path.style.access: true\n\
-" >> /opt/flink/conf/flink-conf.yaml
+' >> /opt/flink/conf/flink-conf.yaml
+
+# ── Bake Hadoop core-site.xml for S3A (flink-s3-fs-hadoop backend) ───────────
+# The flink-s3-fs-hadoop JAR uses Hadoop S3AFileSystem which reads
+# fs.s3a.* properties from Hadoop XML config files.
+# Without this, S3A uses the default AWS endpoint (amazonaws.com) and fails.
+RUN mkdir -p /opt/flink/conf && printf '<?xml version="1.0" encoding="UTF-8"?>\n\
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>\n\
+<configuration>\n\
+  <!-- MinIO endpoint for Hadoop S3A -->\n\
+  <property><name>fs.s3a.endpoint</name><value>http://minio:9000</value></property>\n\
+  <property><name>fs.s3a.path.style.access</name><value>true</value></property>\n\
+  <property><name>fs.s3a.access.key</name><value>minioadmin</value></property>\n\
+  <property><name>fs.s3a.secret.key</name><value>minioadmin</value></property>\n\
+  <property><name>fs.s3a.impl</name><value>org.apache.hadoop.fs.s3a.S3AFileSystem</value></property>\n\
+  <property><name>fs.s3a.connection.ssl.enabled</name><value>false</value></property>\n\
+  <property><name>fs.s3a.attempts.maximum</name><value>3</value></property>\n\
+  <property><name>fs.s3a.multipart.size</name><value>5242880</value></property>\n\
+</configuration>\n\
+' > /opt/flink/conf/core-site.xml

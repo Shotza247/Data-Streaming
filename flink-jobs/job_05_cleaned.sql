@@ -17,6 +17,11 @@
 --
 -- Lineage: kafka://tax-applications → minio://cleaned-tax/
 
+-- ── Enable checkpointing so the filesystem/S3 sink actually flushes ────────
+-- Without checkpoints the StreamingFileSink buffers forever and never commits.
+SET 'execution.checkpointing.interval' = '30s';
+SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
+
 -- ── Kafka source ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS kafka_tax_applications_clean (
     application_id    STRING,

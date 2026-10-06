@@ -3,7 +3,9 @@
 #
 # One-shot initialisation script that runs inside the minio/mc container.
 # Waits for MinIO to become available, configures the mc alias, creates
-# all required buckets, and sets them to public-read policy.
+# all required buckets, and sets them to download policy.
+#
+# NOTE: modern mc uses `mc alias set` not `mc config host add`.
 
 # --- Configuration ---------------------------------------------------------
 MINIO_HOST="${MINIO_ENDPOINT:-minio:9000}"
@@ -18,7 +20,7 @@ BUCKET_MLFLOW="${MINIO_BUCKET_MLFLOW:-mlflow-artifacts}"
 # --- Wait for MinIO to become available ------------------------------------
 echo "Waiting for MinIO at ${MINIO_HOST} ..."
 for i in $(seq 1 30); do
-    if mc config host add "${MINIO_ALIAS}" "http://${MINIO_HOST}" \
+    if mc alias set "${MINIO_ALIAS}" "http://${MINIO_HOST}" \
         "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" 2>/dev/null; then
         echo "MinIO is ready."
         break
@@ -33,10 +35,13 @@ mc mb --ignore-existing "${MINIO_ALIAS}/${BUCKET_RAW}"
 mc mb --ignore-existing "${MINIO_ALIAS}/${BUCKET_CLEANED}"
 mc mb --ignore-existing "${MINIO_ALIAS}/${BUCKET_MLFLOW}"
 
-# --- Set public read policy on all buckets ---------------------------------
-echo "Setting bucket policies to public-read..."
-mc policy set public "${MINIO_ALIAS}/${BUCKET_RAW}"
-mc policy set public "${MINIO_ALIAS}/${BUCKET_CLEANED}"
-mc policy set public "${MINIO_ALIAS}/${MINIO_BUCKET_MLFLOW}"
+# --- Set download policy on all buckets ------------------------------------
+echo "Setting bucket policies to download (public-read)..."
+mc anonymous set download "${MINIO_ALIAS}/${BUCKET_RAW}"
+mc anonymous set download "${MINIO_ALIAS}/${BUCKET_CLEANED}"
+mc anonymous set download "${MINIO_ALIAS}/${BUCKET_MLFLOW}"
+
+echo "Listing buckets:"
+mc ls "${MINIO_ALIAS}/"
 
 echo "MinIO bucket initialisation complete."
