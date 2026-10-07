@@ -452,3 +452,37 @@ All 16 targets documented in DEMO.md and tests/test_subtask8b_10.log.
 - `docs(audit): Sub-Task 6 complete`
 
 ---
+
+---
+
+## Entry 011 -- Sub-Task 11: Flink SQL Timestamp Cleaning + Full Pipeline Activation
+
+**Date:** 2026-10-07
+**Status:** COMPLETE
+
+### Root Cause Fixed
+Producer emits _produced_at as ISO-8601 with microseconds + UTC offset ("2026-10-01T13:32:07.539165+00:00").
+All Flink SQL jobs were silently dropping every record because TO_TIMESTAMP couldn't parse this format.
+json.ignore-parse-errors=true masked the failures.
+
+### Fix: Flink SQL as the Cleaning Layer
+The correct philosophy is to use Flink SQL string functions to normalise the format:
+  REPLACE(SUBSTRING(_produced_at, 1, 19), 'T', ' ')
+  -- yields "2026-10-01 13:32:07" which TO_TIMESTAMP(..., 'yyyy-MM-dd HH:mm:ss') handles perfectly
+
+### Additional Fixes
+- DROP TABLE IF EXISTS before every CREATE TABLE (prevents catalog reuse bugs)
+- SET execution.checkpointing.interval = 30s on ALL jobs
+- SET table.exec.source.idle-timeout = 10s on all event-time jobs
+- job_02: replaced FOR SYSTEM_TIME AS OF with INTERVAL JOIN
+- MinIO bucket creation fixed (mc alias set, not deprecated mc config host add)
+- TaskManager scaled to 8 slots
+- Makefile: added make all one-command startup target
+
+### Verification
+- PostgreSQL tax_kpi_windows: 16 rows of live window data
+- Redis: 17 keys (tax:kpi:latest + 16 window keys)
+- MinIO raw-tax: 35,332 objects | cleaned-tax: 34,940 objects
+- All 6 Kafka consumer groups active
+- 6 Flink jobs RUNNING, 0 failed
+
