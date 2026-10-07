@@ -17,6 +17,13 @@
 --
 -- Lineage: kafka://tax-applications → kafka://fraud-signals
 
+SET 'table.exec.source.idle-timeout' = '10s';
+SET 'execution.checkpointing.interval' = '30s';
+SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
+
+DROP TABLE IF EXISTS kafka_tax_applications_fraud;
+DROP TABLE IF EXISTS kafka_fraud_signals_out;
+
 -- ── Kafka source ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS kafka_tax_applications_fraud (
     application_id    STRING,

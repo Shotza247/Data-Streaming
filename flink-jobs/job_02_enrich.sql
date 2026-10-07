@@ -2,14 +2,21 @@
 --
 -- Job 02: Enrichment — JOIN tax-applications with taxpayer-profiles
 --
--- Performs a temporal join (FOR SYSTEM_TIME AS OF) so each application
--- record is enriched with the taxpayer profile that was current at the
--- time the application was processed. Writes to PostgreSQL.
+-- Writes enriched records to PostgreSQL enriched_tax_applications table.
+-- Uses an INTERVAL JOIN (within 1 hour) which is supported in Flink SQL
+-- for two Kafka streaming sources — no temporal table required.
 --
 -- Lineage: kafka://tax-applications + kafka://taxpayer-profiles
---       → postgres://enriched_tax_applications
+--       => postgres://enriched_tax_applications
 
--- ── Tax applications source ───────────────────────────────────────────────────
+SET 'table.exec.source.idle-timeout' = '10s';
+SET 'execution.checkpointing.interval' = '30s';
+SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
+
+DROP TABLE IF EXISTS kafka_tax_applications_enrich;
+DROP TABLE IF EXISTS kafka_taxpayer_profiles;
+DROP TABLE IF EXISTS pg_enriched_applications;
+
 CREATE TABLE IF NOT EXISTS kafka_tax_applications_enrich (
     application_id    STRING,
     customer_id       STRING,
@@ -25,18 +32,18 @@ CREATE TABLE IF NOT EXISTS kafka_tax_applications_enrich (
     filing_status     STRING,
     is_fraud          BOOLEAN,
     _produced_at      STRING,
-    proc_time         AS PROCTIME()   -- processing-time attribute for temporal join
+    event_time        AS TO_TIMESTAMP(`_produced_at`, 'yyyy-MM-dd''T''HH:mm:ss'),
+    WATERMARK FOR event_time AS event_time - INTERVAL '30' SECOND
 ) WITH (
     'connector'                    = 'kafka',
     'topic'                        = 'tax-applications',
     'properties.bootstrap.servers' = '${KAFKA_BOOTSTRAP_SERVERS}',
     'properties.group.id'          = 'flink-job02-enrich',
-    'scan.startup.mode'            = 'earliest-offset',
+    'scan.startup.mode'            = 'latest-offset',
     'format'                       = 'json',
     'json.ignore-parse-errors'     = 'true'
 );
 
--- ── Taxpayer profiles source (versioned lookup table via processing time) ─────
 CREATE TABLE IF NOT EXISTS kafka_taxpayer_profiles (
     customer_id               STRING,
     age                       INT,
@@ -45,18 +52,18 @@ CREATE TABLE IF NOT EXISTS kafka_taxpayer_profiles (
     avg_income_3yr            DOUBLE,
     flagged_previously        BOOLEAN,
     _produced_at              STRING,
-    proc_time                 AS PROCTIME()
+    event_time                AS TO_TIMESTAMP(`_produced_at`, 'yyyy-MM-dd''T''HH:mm:ss'),
+    WATERMARK FOR event_time AS event_time - INTERVAL '30' SECOND
 ) WITH (
     'connector'                    = 'kafka',
     'topic'                        = 'taxpayer-profiles',
     'properties.bootstrap.servers' = '${KAFKA_BOOTSTRAP_SERVERS}',
     'properties.group.id'          = 'flink-job02-profiles',
-    'scan.startup.mode'            = 'earliest-offset',
+    'scan.startup.mode'            = 'latest-offset',
     'format'                       = 'json',
     'json.ignore-parse-errors'     = 'true'
 );
 
--- ── PostgreSQL sink ───────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS pg_enriched_applications (
     application_id            STRING,
     customer_id               STRING,
@@ -86,9 +93,6 @@ CREATE TABLE IF NOT EXISTS pg_enriched_applications (
     'driver'     = 'org.postgresql.Driver'
 );
 
--- ── Insert: LEFT JOIN on customer_id ─────────────────────────────────────────
--- Using processing-time temporal join pattern — enriches each application
--- with the latest profile snapshot at the time of processing.
 INSERT INTO pg_enriched_applications
 SELECT
     a.application_id,
@@ -111,5 +115,7 @@ SELECT
     COALESCE(p.flagged_previously,       FALSE) AS flagged_previously,
     CURRENT_TIMESTAMP                           AS processed_at
 FROM kafka_tax_applications_enrich AS a
-LEFT JOIN kafka_taxpayer_profiles FOR SYSTEM_TIME AS OF a.proc_time AS p
-    ON a.customer_id = p.customer_id;
+LEFT JOIN kafka_taxpayer_profiles AS p
+    ON a.customer_id = p.customer_id
+    AND p.event_time BETWEEN a.event_time - INTERVAL '1' HOUR
+                         AND a.event_time + INTERVAL '1' HOUR;

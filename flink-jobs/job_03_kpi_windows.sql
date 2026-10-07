@@ -9,6 +9,16 @@
 --
 -- Lineage: kafka://tax-applications → postgres://tax_kpi_windows
 
+-- ── Allow watermark to advance even when Kafka partition is idle ─────────────
+-- Without this, if a Kafka partition stops producing events the watermark
+-- never advances and tumbling windows never close.
+SET 'table.exec.source.idle-timeout' = '10s';
+SET 'execution.checkpointing.interval' = '30s';
+SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
+
+DROP TABLE IF EXISTS kafka_tax_applications_kpi;
+DROP TABLE IF EXISTS pg_tax_kpi_windows;
+
 -- ── Kafka source with event time ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS kafka_tax_applications_kpi (
     application_id  STRING,
@@ -25,7 +35,7 @@ CREATE TABLE IF NOT EXISTS kafka_tax_applications_kpi (
     'topic'                        = 'tax-applications',
     'properties.bootstrap.servers' = '${KAFKA_BOOTSTRAP_SERVERS}',
     'properties.group.id'          = 'flink-job03-kpi',
-    'scan.startup.mode'            = 'earliest-offset',
+    'scan.startup.mode'            = 'latest-offset',
     'format'                       = 'json',
     'json.ignore-parse-errors'     = 'true'
 );
@@ -64,7 +74,6 @@ SELECT
     CAST(
         SUM(CASE WHEN is_fraud = TRUE THEN 1 ELSE 0 END) AS DOUBLE
     ) / NULLIF(COUNT(*), 0)                            AS fraud_rate,
-    -- Lexicographically maximum province in this window (deterministic proxy)
     MAX(province)                                      AS top_province
 FROM kafka_tax_applications_kpi
 GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE);

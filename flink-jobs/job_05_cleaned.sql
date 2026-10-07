@@ -22,6 +22,9 @@
 SET 'execution.checkpointing.interval' = '30s';
 SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
 
+DROP TABLE IF EXISTS kafka_tax_applications_clean;
+DROP TABLE IF EXISTS minio_cleaned_tax;
+
 -- ── Kafka source ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS kafka_tax_applications_clean (
     application_id    STRING,
