@@ -1,0 +1,59 @@
+Sub-Task 11: Flink SQL Timestamp Cleaning + Full Pipeline Activation
+====================================================================
+Date       : 2026-10-07
+Status     : PASS
+
+ROOT CAUSE RESOLVED
+-------------------
+Producer emits _produced_at in ISO-8601 format with microseconds + UTC offset:
+  "2026-10-01T13:32:07.539165+00:00"
+
+All Flink SQL jobs used TO_TIMESTAMP(_produced_at, 'yyyy-MM-dd''T''HH:mm:ss')
+which failed to parse this format. Because json.ignore-parse-errors=true was
+set, all records were silently dropped → 0 read-records in every job.
+
+FIX APPLIED (Flink SQL as the cleaning layer):
+  REPLACE(SUBSTRING(`_produced_at`, 1, 19), 'T', ' ')
+  → strips microseconds + TZ offset
+  → replaces 'T' separator with space
+  → yields "2026-10-01 13:32:07" parseable by TO_TIMESTAMP(,'yyyy-MM-dd HH:mm:ss')
+
+ADDITIONAL FIXES
+----------------
+1. DROP TABLE IF EXISTS before every CREATE TABLE — prevents stale catalog reuse
+2. SET execution.checkpointing.interval = 30s on ALL jobs (was missing on 02/03/04)
+3. SET table.exec.source.idle-timeout = 10s on all event-time jobs
+4. job_02 switched from FOR SYSTEM_TIME AS OF to INTERVAL JOIN (correct for 2 Kafka sources)
+5. MinIO buckets created via mc alias set (minio-init was using deprecated mc config host add)
+6. TaskManager scaled to 8 slots (was 4 — not enough for 6 concurrent jobs)
+7. job_03 scan.startup.mode = latest-offset (KPI for live dashboard, not historical replay)
+8. Flink SQL philosophy: each job documents WHY each transformation exists
+
+FLINK JOBS — FINAL STATUS
+--------------------------
+job_01_raw_to_minio    : RUNNING — archiving to MinIO raw-tax/  (earliest-offset)
+job_02_enrich          : RUNNING — interval JOIN to enriched_tax_applications
+job_03_kpi_windows     : RUNNING — 5-min tumbling windows → tax_kpi_windows
+job_04_fraud_pattern   : RUNNING — patterns A+B → fraud-signals Kafka topic
+job_05_cleaned         : RUNNING — full cleaning → MinIO cleaned-tax/
+
+VERIFICATION
+------------
+Kafka consumer groups active:
+  flink-job01-raw, flink-job02-enrich, flink-job02-profiles,
+  flink-job03-kpi, flink-job04-fraud, flink-job05-clean
+
+PostgreSQL tax_kpi_windows: 16 rows
+  Sample: window_start=2026-10-07T17:05, total_count=300,
+          avg_income=366555.26, fraud_rate=0.1467, top_province=Western Cape
+
+Redis keys: 17 (tax:kpi:latest + 16 window keys)
+  tax:kpi:latest → {total_count:300, avg_income:366555.26, fraud_rate:0.1467}
+
+MinIO raw-tax:     35,332 objects
+MinIO cleaned-tax: 34,940 objects
+
+Flink cluster: 6/8 slots used, 0 jobs failed
+
+Streamlit dashboard: http://localhost:8501 — LIVE DATA
+Flink UI:            http://localhost:8081 — 6 RUNNING jobs
