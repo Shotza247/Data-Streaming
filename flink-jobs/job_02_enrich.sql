@@ -1,23 +1,34 @@
 -- flink-jobs/job_02_enrich.sql
 --
--- Job 02: Enrichment — JOIN tax-applications with taxpayer-profiles
+-- Job 02: Stream Enrichment  →  PostgreSQL enriched_tax_applications
 --
--- Writes enriched records to PostgreSQL enriched_tax_applications table.
--- Uses an INTERVAL JOIN (within 1 hour) which is supported in Flink SQL
--- for two Kafka streaming sources — no temporal table required.
+-- PURPOSE  : Enrich each tax application event with the taxpayer's
+--            profile data via an interval JOIN on the two Kafka streams.
+--            Flink SQL handles the timestamp parsing and stream alignment.
 --
--- Lineage: kafka://tax-applications + kafka://taxpayer-profiles
---       => postgres://enriched_tax_applications
+-- TIMESTAMP HANDLING (Flink SQL as cleaning layer):
+--   Raw _produced_at: "2026-10-01T13:32:07.539165+00:00"
+--   Fix: REPLACE(SUBSTRING(...,1,19), 'T', ' ')  → "2026-10-01 13:32:07"
+--        then TO_TIMESTAMP() → TIMESTAMP(3)
+--
+-- JOIN STRATEGY:
+--   INTERVAL JOIN — links an application event with any profile event
+--   for the same customer_id that falls within ±1 hour of the application.
+--   This is the correct streaming join for two unbounded Kafka sources.
+--
+-- Lineage:  kafka://tax-applications + kafka://taxpayer-profiles
+--        →  postgres://enriched_tax_applications
 
-SET 'table.exec.source.idle-timeout' = '10s';
+SET 'table.exec.source.idle-timeout'   = '10s';
 SET 'execution.checkpointing.interval' = '30s';
-SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
+SET 'execution.checkpointing.mode'     = 'EXACTLY_ONCE';
 
 DROP TABLE IF EXISTS kafka_tax_applications_enrich;
 DROP TABLE IF EXISTS kafka_taxpayer_profiles;
 DROP TABLE IF EXISTS pg_enriched_applications;
 
-CREATE TABLE IF NOT EXISTS kafka_tax_applications_enrich (
+-- ── Source 1: tax application events ─────────────────────────────────────────
+CREATE TABLE kafka_tax_applications_enrich (
     application_id    STRING,
     customer_id       STRING,
     customer_name     STRING,
@@ -32,7 +43,11 @@ CREATE TABLE IF NOT EXISTS kafka_tax_applications_enrich (
     filing_status     STRING,
     is_fraud          BOOLEAN,
     _produced_at      STRING,
-    event_time        AS TO_TIMESTAMP(`_produced_at`, 'yyyy-MM-dd''T''HH:mm:ss'),
+    -- Timestamp cleaning: strip microseconds+TZ, replace T with space
+    event_time AS TO_TIMESTAMP(
+        REPLACE(SUBSTRING(`_produced_at`, 1, 19), 'T', ' '),
+        'yyyy-MM-dd HH:mm:ss'
+    ),
     WATERMARK FOR event_time AS event_time - INTERVAL '30' SECOND
 ) WITH (
     'connector'                    = 'kafka',
@@ -44,7 +59,8 @@ CREATE TABLE IF NOT EXISTS kafka_tax_applications_enrich (
     'json.ignore-parse-errors'     = 'true'
 );
 
-CREATE TABLE IF NOT EXISTS kafka_taxpayer_profiles (
+-- ── Source 2: taxpayer profile events ────────────────────────────────────────
+CREATE TABLE kafka_taxpayer_profiles (
     customer_id               STRING,
     age                       INT,
     risk_score                DOUBLE,
@@ -52,7 +68,11 @@ CREATE TABLE IF NOT EXISTS kafka_taxpayer_profiles (
     avg_income_3yr            DOUBLE,
     flagged_previously        BOOLEAN,
     _produced_at              STRING,
-    event_time                AS TO_TIMESTAMP(`_produced_at`, 'yyyy-MM-dd''T''HH:mm:ss'),
+    -- Same timestamp cleaning as above
+    event_time AS TO_TIMESTAMP(
+        REPLACE(SUBSTRING(`_produced_at`, 1, 19), 'T', ' '),
+        'yyyy-MM-dd HH:mm:ss'
+    ),
     WATERMARK FOR event_time AS event_time - INTERVAL '30' SECOND
 ) WITH (
     'connector'                    = 'kafka',
@@ -64,7 +84,8 @@ CREATE TABLE IF NOT EXISTS kafka_taxpayer_profiles (
     'json.ignore-parse-errors'     = 'true'
 );
 
-CREATE TABLE IF NOT EXISTS pg_enriched_applications (
+-- ── Sink: PostgreSQL enriched_tax_applications ───────────────────────────────
+CREATE TABLE pg_enriched_applications (
     application_id            STRING,
     customer_id               STRING,
     customer_name             STRING,
@@ -83,7 +104,7 @@ CREATE TABLE IF NOT EXISTS pg_enriched_applications (
     historical_filings_count  INT,
     avg_income_3yr            DOUBLE,
     flagged_previously        BOOLEAN,
-    processed_at              TIMESTAMP(3)
+    processed_at              STRING
 ) WITH (
     'connector'  = 'jdbc',
     'url'        = 'jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}',
@@ -93,27 +114,36 @@ CREATE TABLE IF NOT EXISTS pg_enriched_applications (
     'driver'     = 'org.postgresql.Driver'
 );
 
+-- ── Enrichment INSERT: LEFT interval join + field-level cleaning ──────────────
+-- Flink SQL applies data quality transformations on both streams:
+--   - UPPER / TRIM on all categorical fields
+--   - LOWER on email
+--   - SUBSTRING on dates
+--   - COALESCE for missing profile fields (profile may not have arrived yet)
 INSERT INTO pg_enriched_applications
 SELECT
-    a.application_id,
-    a.customer_id,
-    a.customer_name,
-    a.email,
-    a.country,
-    a.province,
+    -- Application fields (cleaned)
+    TRIM(a.application_id)                                              AS application_id,
+    TRIM(a.customer_id)                                                 AS customer_id,
+    TRIM(a.customer_name)                                               AS customer_name,
+    LOWER(TRIM(a.email))                                                AS email,
+    UPPER(TRIM(a.country))                                              AS country,
+    UPPER(TRIM(a.province))                                             AS province,
     a.taxable_income,
-    a.employment_type,
-    a.employment_status,
-    a.submitted_date,
-    a.tax_year,
-    a.filing_status,
+    UPPER(TRIM(a.employment_type))                                      AS employment_type,
+    UPPER(TRIM(a.employment_status))                                    AS employment_status,
+    SUBSTRING(TRIM(a.submitted_date), 1, 10)                           AS submitted_date,
+    TRIM(a.tax_year)                                                    AS tax_year,
+    UPPER(TRIM(a.filing_status))                                        AS filing_status,
     a.is_fraud,
-    COALESCE(p.age,                      0)     AS age,
-    COALESCE(p.risk_score,               0.0)   AS risk_score,
-    COALESCE(p.historical_filings_count, 0)     AS historical_filings_count,
-    COALESCE(p.avg_income_3yr,           0.0)   AS avg_income_3yr,
-    COALESCE(p.flagged_previously,       FALSE) AS flagged_previously,
-    CURRENT_TIMESTAMP                           AS processed_at
+    -- Profile fields: COALESCE ensures clean defaults when no match
+    COALESCE(p.age,                      0)                             AS age,
+    COALESCE(p.risk_score,               0.0)                           AS risk_score,
+    COALESCE(p.historical_filings_count, 0)                             AS historical_filings_count,
+    COALESCE(p.avg_income_3yr,           0.0)                           AS avg_income_3yr,
+    COALESCE(p.flagged_previously,       FALSE)                         AS flagged_previously,
+    -- Flink wall-clock processing time (clean string format)
+    CAST(CURRENT_TIMESTAMP AS STRING)                                   AS processed_at
 FROM kafka_tax_applications_enrich AS a
 LEFT JOIN kafka_taxpayer_profiles AS p
     ON a.customer_id = p.customer_id

@@ -1,32 +1,54 @@
 -- flink-jobs/job_05_cleaned.sql
 --
--- Job 05: Cleaned / Standardised Output → MinIO cleaned-tax bucket
+-- Job 05: Cleaned & Standardised Output  →  MinIO cleaned-tax/
 --
--- Reads the raw tax-applications stream, applies data quality rules,
--- standardises values, and writes clean, typed records to the MinIO
--- cleaned-tax bucket partitioned by date. This is the source of truth
--- for DuckDB OLAP, MLflow training, and Qdrant vector seeding.
+-- PURPOSE  : This is the core DATA QUALITY job. Flink SQL is the
+--            transformation layer — not just a pipe. Every field gets
+--            type-safe parsing, canonical casing, and null guards
+--            before landing in the data lake.
 --
--- Transformations applied:
---   - UPPER(country), UPPER(province)  — canonical case
---   - TRIM on all STRING fields         — strip whitespace
---   - CAST taxable_income to DECIMAL    — explicit precision
---   - WHERE filter: non-null customer_id, application_id, taxable_income >= 0
---   - Add processed_at TIMESTAMP column
---   - dt partition column = YYYY-MM-DD portion of submitted_date
+-- TRANSFORMATIONS APPLIED (Flink SQL as the cleaning engine):
 --
--- Lineage: kafka://tax-applications → minio://cleaned-tax/
+--   TIMESTAMPS
+--     Raw: "2026-10-01T13:32:07.539165+00:00"  (ISO-8601, microseconds, TZ offset)
+--     Fix: SUBSTRING(_produced_at, 1, 19)       → "2026-10-01T13:32:07"
+--          REPLACE(..., 'T', ' ')               → "2026-10-01 13:32:07"
+--          stored as clean STRING 'yyyy-MM-dd HH:mm:ss'
+--
+--   DATES
+--     Raw: "2026-03-30"  (may have trailing spaces or extra chars)
+--     Fix: SUBSTRING(submitted_date, 1, 10)     → safe YYYY-MM-DD slice
+--
+--   STRINGS  (all fields)
+--     TRIM()  strips leading/trailing whitespace
+--
+--   CASE NORMALISATION  (categorical fields → canonical UPPERCASE)
+--     country, province, employment_type, employment_status, filing_status
+--
+--   EMAIL normalisation
+--     LOWER(TRIM(email))  → enforces lowercase for deduplication
+--
+--   NUMERICS
+--     taxable_income DOUBLE  → kept as-is (already clean from JSON)
+--
+--   NULL GUARDS
+--     WHERE filters drop records with null primary keys or negative income
+--
+--   AUDIT COLUMN
+--     flink_processed_at  — when Flink wrote this row (wall-clock time)
+--
+-- Lineage:  kafka://tax-applications  →  minio://cleaned-tax/
 
--- ── Enable checkpointing so the filesystem/S3 sink actually flushes ────────
--- Without checkpoints the StreamingFileSink buffers forever and never commits.
 SET 'execution.checkpointing.interval' = '30s';
-SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
+SET 'execution.checkpointing.mode'     = 'EXACTLY_ONCE';
+SET 'table.exec.source.idle-timeout'   = '10s';
 
 DROP TABLE IF EXISTS kafka_tax_applications_clean;
 DROP TABLE IF EXISTS minio_cleaned_tax;
 
--- ── Kafka source ──────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS kafka_tax_applications_clean (
+-- ── Source: raw Kafka stream ──────────────────────────────────────────────────
+-- All raw fields ingested as-is; computed columns do the cleaning.
+CREATE TABLE kafka_tax_applications_clean (
     application_id    STRING,
     customer_id       STRING,
     customer_name     STRING,
@@ -41,7 +63,14 @@ CREATE TABLE IF NOT EXISTS kafka_tax_applications_clean (
     filing_status     STRING,
     is_fraud          BOOLEAN,
     _produced_at      STRING,
-    event_time        AS TO_TIMESTAMP(`_produced_at`, 'yyyy-MM-dd''T''HH:mm:ss'),
+    -- ── Timestamp cleaning (computed column) ──────────────────────────────────
+    -- Step 1: slice to 19 chars → "2026-10-01T13:32:07"
+    -- Step 2: replace 'T' with space → "2026-10-01 13:32:07"
+    -- Step 3: parse as TIMESTAMP for watermark arithmetic
+    event_time AS TO_TIMESTAMP(
+        REPLACE(SUBSTRING(`_produced_at`, 1, 19), 'T', ' '),
+        'yyyy-MM-dd HH:mm:ss'
+    ),
     WATERMARK FOR event_time AS event_time - INTERVAL '30' SECOND
 ) WITH (
     'connector'                    = 'kafka',
@@ -53,23 +82,24 @@ CREATE TABLE IF NOT EXISTS kafka_tax_applications_clean (
     'json.ignore-parse-errors'     = 'true'
 );
 
--- ── MinIO cleaned-tax sink ────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS minio_cleaned_tax (
-    application_id    STRING,
-    customer_id       STRING,
-    customer_name     STRING,
-    email             STRING,
-    country           STRING,
-    province          STRING,
-    taxable_income    DOUBLE,
-    employment_type   STRING,
-    employment_status STRING,
-    submitted_date    STRING,
-    tax_year          STRING,
-    filing_status     STRING,
-    is_fraud          BOOLEAN,
-    processed_at      STRING,
-    dt                STRING   -- partition column (YYYY-MM-DD)
+-- ── Sink: MinIO cleaned-tax bucket, partitioned by date ──────────────────────
+CREATE TABLE minio_cleaned_tax (
+    application_id     STRING,
+    customer_id        STRING,
+    customer_name      STRING,
+    email              STRING,
+    country            STRING,
+    province           STRING,
+    taxable_income     DOUBLE,
+    employment_type    STRING,
+    employment_status  STRING,
+    submitted_date     STRING,
+    tax_year           STRING,
+    filing_status      STRING,
+    is_fraud           BOOLEAN,
+    produced_at        STRING,
+    flink_processed_at STRING,
+    dt                 STRING
 ) PARTITIONED BY (dt)
 WITH (
     'connector'                             = 'filesystem',
@@ -79,27 +109,58 @@ WITH (
     'sink.partition-commit.delay'           = '1 min'
 );
 
--- ── Cleaned insert ────────────────────────────────────────────────────────────
+-- ── Cleaning INSERT: every transformation is explicit and documented ──────────
 INSERT INTO minio_cleaned_tax
 SELECT
-    TRIM(application_id)                        AS application_id,
-    TRIM(customer_id)                           AS customer_id,
-    TRIM(customer_name)                         AS customer_name,
-    LOWER(TRIM(email))                          AS email,
-    UPPER(TRIM(country))                        AS country,
-    UPPER(TRIM(province))                       AS province,
+    -- Primary keys: trim only (preserve exact UUID)
+    TRIM(application_id)                                                AS application_id,
+    TRIM(customer_id)                                                   AS customer_id,
+
+    -- Display name: trim whitespace
+    TRIM(customer_name)                                                 AS customer_name,
+
+    -- Email: lowercase + trim for deduplication consistency
+    LOWER(TRIM(email))                                                  AS email,
+
+    -- Geography: UPPER for canonical lookup (e.g. 'south africa' → 'SOUTH AFRICA')
+    UPPER(TRIM(country))                                                AS country,
+    UPPER(TRIM(province))                                               AS province,
+
+    -- Income: kept as DOUBLE (already numeric from JSON decoder)
     taxable_income,
-    UPPER(TRIM(employment_type))                AS employment_type,
-    UPPER(TRIM(employment_status))              AS employment_status,
-    SUBSTRING(submitted_date, 1, 10)            AS submitted_date,
-    TRIM(tax_year)                              AS tax_year,
-    UPPER(TRIM(filing_status))                  AS filing_status,
+
+    -- Employment categoricals: UPPER for consistent enum values
+    UPPER(TRIM(employment_type))                                        AS employment_type,
+    UPPER(TRIM(employment_status))                                      AS employment_status,
+
+    -- Date: safe YYYY-MM-DD slice (strips time if present, trims extras)
+    SUBSTRING(TRIM(submitted_date), 1, 10)                             AS submitted_date,
+
+    -- Fiscal year: trim only (e.g. '2024/25' kept as-is — SA standard)
+    TRIM(tax_year)                                                      AS tax_year,
+
+    -- Filing status: UPPER for canonical enum
+    UPPER(TRIM(filing_status))                                          AS filing_status,
+
+    -- Fraud flag: pass through
     is_fraud,
-    CAST(CURRENT_TIMESTAMP AS STRING)           AS processed_at,
-    SUBSTRING(submitted_date, 1, 10)            AS dt
+
+    -- Cleaned producer timestamp:
+    --   Raw:   "2026-10-01T13:32:07.539165+00:00"
+    --   Clean: "2026-10-01 13:32:07"  (19-char UTC, no microseconds, no offset)
+    REPLACE(SUBSTRING(_produced_at, 1, 19), 'T', ' ')                  AS produced_at,
+
+    -- Flink processing timestamp (wall-clock, when this row was transformed)
+    CAST(CURRENT_TIMESTAMP AS STRING)                                   AS flink_processed_at,
+
+    -- Partition key: YYYY-MM-DD from cleaned submitted_date
+    SUBSTRING(TRIM(submitted_date), 1, 10)                             AS dt
+
 FROM kafka_tax_applications_clean
 WHERE
+    -- Data quality gates: drop structurally invalid records
     application_id IS NOT NULL
     AND customer_id IS NOT NULL
     AND taxable_income IS NOT NULL
-    AND taxable_income >= 0.0;
+    AND taxable_income >= 0.0
+    AND CHAR_LENGTH(TRIM(submitted_date)) >= 10;

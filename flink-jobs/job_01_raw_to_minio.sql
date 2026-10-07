@@ -1,23 +1,28 @@
 -- flink-jobs/job_01_raw_to_minio.sql
 --
--- Job 01: Raw Archival — tax-applications → MinIO raw-tax bucket
+-- Job 01: Raw Archival  —  kafka:tax-applications  →  MinIO raw-tax/
 --
--- Reads every event from the tax-applications Kafka topic and writes
--- it as-is to MinIO (raw-tax bucket) partitioned by submitted_date.
--- No transformations — pure archival for the data lake layer.
+-- PURPOSE  : Archive every inbound event as-is (schema-on-read lake layer).
+--            No cleaning. No filtering. Partitioned by event date.
 --
--- Lineage: kafka://tax-applications → minio://raw-tax/
+-- TIMESTAMP HANDLING (Flink SQL as cleaning layer):
+--   Producer emits ISO-8601 with microseconds + UTC offset, e.g.
+--     "2026-10-01T13:32:07.539165+00:00"
+--   We use SUBSTRING(..., 1, 19) to strip microseconds and offset,
+--   yielding a clean "yyyy-MM-dd'T'HH:mm:ss" string that
+--   TO_TIMESTAMP() can parse deterministically.
+--
+-- Lineage:  kafka://tax-applications  →  minio://raw-tax/
 
--- ── Enable checkpointing so the filesystem/S3 sink actually flushes ────────
--- Without checkpoints the StreamingFileSink buffers forever and never commits.
 SET 'execution.checkpointing.interval' = '30s';
-SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
+SET 'execution.checkpointing.mode'     = 'EXACTLY_ONCE';
+SET 'table.exec.source.idle-timeout'   = '10s';
 
 DROP TABLE IF EXISTS kafka_tax_applications_raw;
 DROP TABLE IF EXISTS minio_raw_tax;
 
--- ── Kafka source ──────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS kafka_tax_applications_raw (
+-- ── Source: raw Kafka events (all fields kept as STRING where ambiguous) ──────
+CREATE TABLE kafka_tax_applications_raw (
     application_id    STRING,
     customer_id       STRING,
     customer_name     STRING,
@@ -32,8 +37,8 @@ CREATE TABLE IF NOT EXISTS kafka_tax_applications_raw (
     filing_status     STRING,
     is_fraud          BOOLEAN,
     _produced_at      STRING,
-    -- Flink metadata
-    event_time AS TO_TIMESTAMP(`_produced_at`, 'yyyy-MM-dd''T''HH:mm:ss'),
+    -- Flink SQL cleans the timestamp: strip microseconds + TZ offset first
+    event_time AS TO_TIMESTAMP(SUBSTRING(`_produced_at`, 1, 19), 'yyyy-MM-dd''T''HH:mm:ss'),
     WATERMARK FOR event_time AS event_time - INTERVAL '10' SECOND
 ) WITH (
     'connector'                    = 'kafka',
@@ -45,8 +50,8 @@ CREATE TABLE IF NOT EXISTS kafka_tax_applications_raw (
     'json.ignore-parse-errors'     = 'true'
 );
 
--- ── MinIO sink (filesystem connector, JSON, partitioned by date) ──────────────
-CREATE TABLE IF NOT EXISTS minio_raw_tax (
+-- ── Sink: MinIO raw-tax bucket, partitioned by event date ────────────────────
+CREATE TABLE minio_raw_tax (
     application_id    STRING,
     customer_id       STRING,
     customer_name     STRING,
@@ -61,17 +66,17 @@ CREATE TABLE IF NOT EXISTS minio_raw_tax (
     filing_status     STRING,
     is_fraud          BOOLEAN,
     _produced_at      STRING,
-    dt                STRING   -- partition column (date string)
+    dt                STRING
 ) PARTITIONED BY (dt)
 WITH (
-    'connector'            = 'filesystem',
-    'path'                 = 's3a://${MINIO_BUCKET_RAW}/',
-    'format'               = 'json',
-    'sink.partition-commit.policy.kind' = 'success-file',
-    'sink.partition-commit.delay'       = '1 min'
+    'connector'                             = 'filesystem',
+    'path'                                  = 's3a://${MINIO_BUCKET_RAW}/',
+    'format'                                = 'json',
+    'sink.partition-commit.policy.kind'     = 'success-file',
+    'sink.partition-commit.delay'           = '1 min'
 );
 
--- ── Insert ────────────────────────────────────────────────────────────────────
+-- ── Insert: archive with date partition derived from event_time ───────────────
 INSERT INTO minio_raw_tax
 SELECT
     application_id,
@@ -88,5 +93,6 @@ SELECT
     filing_status,
     is_fraud,
     _produced_at,
-    SUBSTRING(submitted_date, 1, 10) AS dt   -- YYYY-MM-DD partition
+    -- partition key: first 10 chars of submitted_date (YYYY-MM-DD)
+    SUBSTRING(submitted_date, 1, 10)  AS dt
 FROM kafka_tax_applications_raw;
