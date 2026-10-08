@@ -486,3 +486,87 @@ The correct philosophy is to use Flink SQL string functions to normalise the for
 - All 6 Kafka consumer groups active
 - 6 Flink jobs RUNNING, 0 failed
 
+
+---
+
+## Entry 012 — Sub-Task 12: Platform Control Center + Full Pipeline Fix
+
+**Date:** 2026-10-08
+**Status:** ✅ COMPLETE
+**Commit:** `93bfc42`
+
+### Problem Statement
+Multiple pipeline components were stale or inactive:
+- `enriched_tax_applications`: 0 rows (job_02 stuck in checkpoint restart loop)
+- `fraud_detections`: 0 rows (job_04 writes to Kafka, not PostgreSQL — no consumer)
+- Marquez lineage events failing (MARQUEZ_API_URL was container-internal from host)
+- No UI way to start/stop producers or resubmit Flink jobs
+
+### Fixes Applied
+
+#### Flink Job Repairs
+| Job | Problem | Fix |
+|---|---|---|
+| job_02_enrich.sql | EXACTLY_ONCE + earliest-offset → duplicate key PK violations → 424 failed checkpoints | Switch to latest-offset + AT_LEAST_ONCE + JDBC flush props |
+| job_06 (NEW) | fraud_detections had 0 rows — job_04 only writes to Kafka | Created job_06_fraud_signals_to_pg.sql: kafka://fraud-signals → postgres://fraud_detections |
+
+#### Lineage URL Fix
+- `scripts/submit_flink_jobs.py`: hardcode `MARQUEZ_URL = http://localhost:5000` (host-side scripts need port-mapped URL, not container DNS)
+
+### New: Platform Control Center Tab (`dashboard/tabs/tab_control.py`)
+
+Full operational UI added as Tab 6 in Streamlit dashboard:
+
+| Section | Features |
+|---|---|
+| 🩺 Service Health Grid | 12 services, colour-coded 🟢🟡🔴, dual Podman API + HTTP probe |
+| 📨 Kafka Topic Counts | Real-time message counts for all 4 topics |
+| 🚀 Producer Controls | ▶ Start / ⏹ Stop / 🔄 Restart per-producer + Start ALL / Stop ALL |
+| ⚡ Flink Job Manager | Live job table (state, duration, cancel button, Flink UI deep-links) |
+| 🔁 SQL Job Resubmit | Multi-select jobs, render env vars, submit via sql-client.sh from UI |
+| 🔧 Pipeline Actions | One-click: Seed Qdrant, Train MLflow, Smoke Test, Submit Lineage |
+| 📋 Log Viewer | Any container, configurable tail, Podman API + CLI fallback |
+
+#### Backend: Dual-Mode Container Management
+```
+Priority 1: Podman REST API via mounted UNIX socket /run/podman.sock
+  → Uses stdlib http.client + AF_UNIX socket (no extra deps)
+  → Calls /v4.0.0/containers/{name}/start|stop|restart|json|logs
+
+Priority 2: CLI subprocess fallback
+  → podman start|stop|restart|inspect|logs
+  → Works when running dashboard locally outside container
+```
+
+#### docker-compose.yml Changes
+```yaml
+streamlit:
+  volumes:
+    - ./scripts:/scripts          # for pipeline action buttons
+    - ./flink-jobs:/flink-jobs    # for SQL resubmit UI
+    - /run/user/1000/podman/podman.sock:/run/podman.sock:ro
+  environment:
+    FLINK_API_URL: http://flink-jobmanager:8081
+    PODMAN_SOCK: /run/podman.sock
+    CONTAINER_CLI: podman
+```
+
+### Verification (end of session)
+```
+Flink jobs:       8/9 RUNNING (1 old CANCELED entry)
+enriched_tax_applications: 35 rows and growing
+fraud_detections:          120,731 rows
+tax_kpi_windows:           72 rows
+producers:                 4/4 running (1 event/sec each)
+```
+
+### Files Changed
+| File | Change |
+|---|---|
+| `dashboard/tabs/tab_control.py` | NEW — 450+ line Platform Control Center |
+| `dashboard/app.py` | Added tab6 Control Center |
+| `docker-compose.yml` | Streamlit socket mount + env vars |
+| `flink-jobs/job_02_enrich.sql` | latest-offset + AT_LEAST_ONCE + JDBC flush |
+| `flink-jobs/job_06_fraud_signals_to_pg.sql` | NEW — fraud signals → postgres |
+| `scripts/submit_flink_jobs.py` | job_06 lineage metadata + Marquez URL fix |
+
