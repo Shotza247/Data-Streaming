@@ -1,0 +1,252 @@
+
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Platform Control Center</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:2rem}
+  h1{font-size:1.9rem;font-weight:800;color:#f8fafc;margin-bottom:.25rem}
+  .sub{color:#94a3b8;font-size:.95rem;margin-bottom:2rem}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.2rem;margin-bottom:2rem}
+  .card{background:#1e293b;border-radius:12px;padding:1.2rem 1.4rem;border-left:4px solid #3b82f6}
+  .card.green{border-color:#22c55e} .card.orange{border-color:#f59e0b}
+  .card.violet{border-color:#8b5cf6} .card.red{border-color:#ef4444}
+  .card.teal{border-color:#14b8a6} .card.sky{border-color:#0ea5e9}
+  .card h3{font-size:1rem;font-weight:700;color:#f1f5f9;margin-bottom:.5rem}
+  .card p{font-size:.82rem;color:#94a3b8;line-height:1.55}
+  .card code{background:#0f172a;padding:2px 6px;border-radius:4px;font-size:.78rem;color:#7dd3fc}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:700;margin:2px 2px 2px 0}
+  .bg-green{background:#166534;color:#bbf7d0} .bg-orange{background:#7c2d12;color:#fed7aa}
+  .bg-blue{background:#1e3a5f;color:#bae6fd} .bg-purple{background:#4a1d96;color:#ddd6fe}
+  .bg-red{background:#7f1d1d;color:#fecaca} .bg-gray{background:#374151;color:#d1d5db}
+  .section{margin-bottom:2rem}
+  .section h2{font-size:1.2rem;font-weight:700;color:#f1f5f9;margin-bottom:1rem;padding-bottom:.5rem;border-bottom:1px solid #334155}
+  table{width:100%;border-collapse:collapse;font-size:.83rem}
+  th{text-align:left;padding:.6rem .8rem;background:#1e293b;color:#94a3b8;font-weight:600;border-bottom:1px solid #334155}
+  td{padding:.55rem .8rem;border-bottom:1px solid #1e293b;color:#e2e8f0;vertical-align:top}
+  tr:hover td{background:#1e293b88}
+  .stat{font-size:2rem;font-weight:800;color:#3b82f6}
+  .stat-label{font-size:.75rem;color:#64748b;margin-top:2px}
+  .stats-row{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-bottom:2rem}
+  .stat-card{background:#1e293b;border-radius:10px;padding:1rem 1.2rem;text-align:center}
+  .pipeline{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.8rem 0}
+  .step{background:#1e293b;border-radius:8px;padding:.5rem 1rem;font-size:.8rem;color:#e2e8f0;border:1px solid #334155;white-space:nowrap}
+  .arrow{color:#3b82f6;font-size:1rem}
+  .fix-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem}
+  .fix-box{background:#1e293b;border-radius:8px;padding:1rem 1.2rem}
+  .fix-box h4{font-size:.9rem;color:#f59e0b;margin-bottom:.5rem}
+  .fix-box ul{list-style:none;font-size:.8rem;color:#94a3b8}
+  .fix-box ul li:before{content:"→ ";color:#3b82f6}
+  .fix-box ul li{margin-bottom:.3rem}
+  .live-badge{display:inline-flex;align-items:center;gap:.4rem;background:#052e16;border:1px solid #16a34a;border-radius:20px;padding:4px 14px;font-size:.78rem;color:#4ade80;font-weight:700}
+  .live-dot{width:8px;height:8px;background:#4ade80;border-radius:50%;animation:pulse 1.5s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .commit{font-family:monospace;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:.5rem 1rem;font-size:.8rem;color:#7dd3fc;margin-top:.5rem;display:inline-block}
+</style>
+</head>
+<body>
+
+<h1>⚙️ Platform Control Center — Build Complete</h1>
+<p class="sub">Sub-Task 12 · Tab 6 added to Streamlit Dashboard · Commits 93bfc42 + 2f184e5 pushed to main</p>
+
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat" style="color:#22c55e">8/9</div>
+    <div class="stat-label">Flink Jobs RUNNING</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat" style="color:#3b82f6">35+</div>
+    <div class="stat-label">enriched_tax_applications rows ↑</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat" style="color:#ef4444">120,731</div>
+    <div class="stat-label">fraud_detections rows</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat" style="color:#f59e0b">72</div>
+    <div class="stat-label">KPI window rows</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat" style="color:#8b5cf6">4/4</div>
+    <div class="stat-label">Producers running</div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>🆕 What Was Built — Control Center Tab</h2>
+  <div class="grid">
+    <div class="card green">
+      <h3>🩺 Service Health Grid</h3>
+      <p>12 services shown in a 4-column card grid.<br />
+      <span class="badge bg-green">🟢 RUNNING</span>
+      <span class="badge bg-orange">🟡 DEGRADED</span>
+      <span class="badge bg-red">🔴 DOWN</span><br /><br />
+      Dual probe strategy: <code>Podman REST API</code> → HTTP endpoint check → container state fallback. No CLI required inside the container.</p>
+    </div>
+    <div class="card orange">
+      <h3>🚀 Producer Controls</h3>
+      <p>Per-producer row with inline state badge and three action buttons:<br /><br />
+      <span class="badge bg-green">▶ Start</span>
+      <span class="badge bg-red">⏹ Stop</span>
+      <span class="badge bg-blue">🔄 Restart</span>
+      <span class="badge bg-gray">📋 Logs</span><br /><br />
+      Plus: <strong>Start ALL</strong> / <strong>Stop ALL</strong> one-click bulk actions at the bottom. State refreshes automatically after each action.</p>
+    </div>
+    <div class="card violet">
+      <h3>⚡ Flink Job Manager</h3>
+      <p>Live table of all Flink jobs from <code>localhost:8081/jobs/overview</code>:<br />
+      • Job name (cleaned), state badge, duration<br />
+      • ✖ Cancel button per RUNNING job<br />
+      • 📈 Deep-link to Flink UI<br /><br />
+      <strong>Resubmit panel</strong>: multi-select SQL files, renders <code>${ENV}</code> vars, submits via <code>sql-client.sh -f</code> with live log output.</p>
+    </div>
+    <div class="card teal">
+      <h3>🔧 Pipeline Actions</h3>
+      <p>Four one-click buttons that run scripts inline and stream output to the browser:<br /><br />
+      <span class="badge bg-blue">🌱 Seed Qdrant</span>
+      <span class="badge bg-purple">🤖 Train MLflow</span>
+      <span class="badge bg-gray">🧪 Smoke Test</span>
+      <span class="badge bg-blue">📬 Submit Lineage</span></p>
+    </div>
+    <div class="card sky">
+      <h3>📨 Kafka Topic Counts</h3>
+      <p>Real-time message counts for all 4 topics via <code>GetOffsetShell</code> summed across 3 partitions. Displayed as large metric cards with topic-coloured borders.</p>
+    </div>
+    <div class="card">
+      <h3>📋 Container Log Viewer</h3>
+      <p>Dropdown of all 15+ containers. Configurable tail (10–500 lines). Fetches via <code>Podman REST API /containers/{name}/logs</code> with <code>podman logs</code> CLI fallback. Output shown in syntax-highlighted code block.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>🔌 Backend: Dual-Mode Container Management</h2>
+  <table>
+    <tr><th>Mode</th><th>How It Works</th><th>When Used</th></tr>
+    <tr>
+      <td><span class="badge bg-green">Primary</span> Podman REST API</td>
+      <td>Stdlib <code>http.client</code> + <code>AF_UNIX</code> socket — zero extra dependencies. Calls <code>/v4.0.0/containers/{name}/start|stop|restart|json|logs</code></td>
+      <td>When running inside Streamlit container with socket mounted at <code>/run/podman.sock</code></td>
+    </tr>
+    <tr>
+      <td><span class="badge bg-orange">Fallback</span> CLI subprocess</td>
+      <td><code>podman start|stop|restart|logs|inspect</code> via <code>subprocess.run()</code></td>
+      <td>Running dashboard locally on host machine; socket unavailable</td>
+    </tr>
+    <tr>
+      <td><span class="badge bg-gray">Graceful fail</span></td>
+      <td>All errors surface as inline <code>st.error()</code> messages — never crashes the page</td>
+      <td>Both modes fail (socket missing + CLI not found)</td>
+    </tr>
+  </table>
+</div>
+
+<div class="section">
+  <h2>🔧 Pipeline Fixes Applied This Session</h2>
+  <div class="fix-row">
+    <div class="fix-box">
+      <h4>🐛 Job 02 (enriched_tax_applications) — was 0 rows</h4>
+      <ul>
+        <li>Root cause: EXACTLY_ONCE + earliest-offset → 424 failed checkpoints due to duplicate PK on restart</li>
+        <li>Fix: switched to <code>latest-offset</code> + <code>AT_LEAST_ONCE</code></li>
+        <li>Added JDBC sink flush props: <code>max-rows=100, interval=2s</code></li>
+        <li>Fixed Flink DECIMAL/DATE type mapping vs PG numeric/date columns</li>
+        <li>Result: 35+ rows and growing continuously</li>
+      </ul>
+    </div>
+    <div class="fix-box">
+      <h4>🆕 Job 06 (fraud_detections) — was 0 rows</h4>
+      <ul>
+        <li>Root cause: job_04 writes fraud patterns to <em>Kafka</em> only — no postgres consumer</li>
+        <li>Fix: created <code>job_06_fraud_signals_to_pg.sql</code></li>
+        <li>Consumes kafka://fraud-signals (earliest-offset)</li>
+        <li>Maps signal_id → detection_id, adds severity normalisation CASE</li>
+        <li>Adds source='FLINK' to satisfy CHECK constraint</li>
+        <li>Result: 120,731 rows instantly on first submit</li>
+      </ul>
+    </div>
+  </div>
+  <div class="fix-row">
+    <div class="fix-box">
+      <h4>🔗 Marquez Lineage URL Fix</h4>
+      <ul>
+        <li>MARQUEZ_API_URL=http://marquez:5000 only resolves inside containers</li>
+        <li>submit_flink_jobs.py runs from host → must use localhost:5000</li>
+        <li>Fix: hardcode <code>MARQUEZ_URL = http://localhost:5000</code> in script</li>
+      </ul>
+    </div>
+    <div class="fix-box">
+      <h4>🐳 Docker Compose Streamlit Mounts</h4>
+      <ul>
+        <li>Added volume: <code>./scripts:/scripts</code></li>
+        <li>Added volume: <code>./flink-jobs:/flink-jobs</code></li>
+        <li>Added volume: <code>Podman socket → /run/podman.sock:ro</code></li>
+        <li>Added env: FLINK_API_URL, PODMAN_SOCK, CONTAINER_CLI</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>🏗️ Live Pipeline Architecture</h2>
+  <div class="pipeline">
+    <span class="step">👥 4 Producers<br /><small>1 event/sec each</small></span>
+    <span class="arrow">→</span>
+    <span class="step">📨 Kafka Topics<br /><small>4 topics, 3 partitions</small></span>
+    <span class="arrow">→</span>
+    <span class="step">⚡ Flink SQL<br /><small>8 jobs RUNNING</small></span>
+  </div>
+  <div class="pipeline">
+    <span class="step">📦 MinIO raw-tax<br /><small>archival</small></span>
+    <span class="step">📦 MinIO cleaned-tax<br /><small>OLAP source</small></span>
+    <span class="step">🐘 PostgreSQL<br /><small>3 live tables</small></span>
+    <span class="step">⚡ Redis<br /><small>KPI hot cache</small></span>
+    <span class="step">📨 Kafka fraud-signals<br /><small>CEP patterns</small></span>
+  </div>
+  <div class="pipeline">
+    <span class="step">🦆 DuckDB OLAP<br /><small>queries MinIO</small></span>
+    <span class="arrow">→</span>
+    <span class="step">🤖 MLflow<br /><small>fraud-detector</small></span>
+    <span class="arrow">+</span>
+    <span class="step">🔍 Qdrant<br /><small>vector search</small></span>
+    <span class="arrow">→</span>
+    <span class="step">🧠 LangGraph<br /><small>Supervisor+Agents</small></span>
+    <span class="arrow">→</span>
+    <span class="step" style="border-color:#3b82f6;background:#1e3a5f">📊 Streamlit<br /><small>6-tab dashboard</small></span>
+  </div>
+</div>
+
+<div class="section">
+  <h2>📌 Dashboard Tabs</h2>
+  <table>
+    <tr><th>Tab</th><th>Data Source</th><th>Status</th></tr>
+    <tr><td>📊 Tax KPIs</td><td>Redis hot cache + DuckDB MinIO</td><td><span class="badge bg-green">✅ LIVE — 72 KPI windows</span></td></tr>
+    <tr><td>🚨 Fraud Intelligence</td><td>PostgreSQL fraud_detections + DuckDB</td><td><span class="badge bg-green">✅ LIVE — 120,731 signals</span></td></tr>
+    <tr><td>🤖 AI Agent Chat</td><td>LangGraph + HF API + Qdrant RAG</td><td><span class="badge bg-orange">⚠️ Needs Qdrant seed + HF token</span></td></tr>
+    <tr><td>🔗 Data Lineage</td><td>Marquez REST API</td><td><span class="badge bg-green">✅ LIVE — 6 namespaces</span></td></tr>
+    <tr><td>🧪 MLflow Status</td><td>MLflow REST API</td><td><span class="badge bg-orange">⚠️ Run make train to register model</span></td></tr>
+    <tr><td>⚙️ Control Center</td><td>Podman socket + Flink REST</td><td><span class="badge bg-green">✅ NEW — full operational control</span></td></tr>
+  </table>
+</div>
+
+<div class="section">
+  <h2>⏭️ Remaining Actions</h2>
+  <table>
+    <tr><th>Action</th><th>Command</th><th>Effect</th></tr>
+    <tr><td>Seed Qdrant KB</td><td><code>python scripts/seed_qdrant.py --kb-only</code><br /><em>or use Control Center tab</em></td><td>Enables AI Agent Chat RAG answers</td></tr>
+    <tr><td>Train MLflow model</td><td><code>python mlflow/train_fraud_model.py</code><br /><em>or use Control Center tab</em></td><td>Registers fraud-detector in Model Registry</td></tr>
+    <tr><td>Force-recreate Streamlit</td><td><code>podman compose up -d --force-recreate streamlit</code></td><td>Picks up new socket mount + volumes</td></tr>
+    <tr><td>Verify enriched rows growing</td><td><code>podman exec postgres psql -U taxuser -d taxdb -c "SELECT COUNT(*) FROM enriched_tax_applications;"</code></td><td>Should increase ~1/sec</td></tr>
+  </table>
+</div>
+
+<div style="margin-top:1.5rem">
+  <div class="live-badge"><span class="live-dot"></span> PIPELINE ACTIVE</div>
+  <span class="commit">93bfc42 feat(dashboard): Platform Control Center</span>
+  <span class="commit">2f184e5 docs(audit): Entry 012</span>
+  <div style="margin-top:.8rem;font-size:.78rem;color:#475569">Repo: github.com/Shotza247/Data-Streaming · Branch: main · 8/9 Flink jobs RUNNING</div>
+</div>
+
+</body>
+</html>
