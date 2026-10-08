@@ -80,12 +80,13 @@ st.markdown('<div class="main-header">&#127963;&#65039; Real-Time Tax Analytics 
 st.markdown('<div class="sub-header">Open-source streaming &middot; Kafka &middot; Flink SQL &middot; DuckDB &middot; LangGraph &middot; MLflow</div>', unsafe_allow_html=True)
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Tax KPIs",
     "🚨 Fraud Intelligence",
     "🤖 AI Agent Chat",
     "🔗 Data Lineage",
     "🧪 MLflow Status",
+    "⚙️ Control Center",
 ])
 
 with tab1:
@@ -106,4 +107,8 @@ with tab4:
 
 with tab5:
     from tabs.tab_mlflow import render
+    render()
+
+with tab6:
+    from tabs.tab_control import render
     render()

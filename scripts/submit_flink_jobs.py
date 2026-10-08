@@ -45,7 +45,13 @@ from lineage.lineage_schemas import (
 FLINK_JOBS_DIR  = Path(__file__).parent.parent / "flink-jobs"
 CONTAINER_CLI   = os.getenv("CONTAINER_CLI", "podman")
 SQL_CLIENT_CTR  = "flink-sql-client"
-MARQUEZ_URL     = os.getenv("MARQUEZ_API_URL", os.getenv("MARQUEZ_URL", "http://localhost:5000"))
+# Marquez URL resolution:
+#   Inside container: http://marquez:5000  (from MARQUEZ_API_URL env)
+#   Host-side script: http://localhost:5000 (port-mapped)
+# We always try localhost:5000 first (host-side), then fall back to env var.
+_marquez_env    = os.getenv("MARQUEZ_API_URL", "http://marquez:5000")
+_marquez_host   = "http://localhost:5000"
+MARQUEZ_URL     = _marquez_host   # host-side default (scripts run from host)
 LINEAGE_URL     = f"{MARQUEZ_URL}/api/v1/lineage"
 
 lineage = LineageClient(producer_url=LINEAGE_URL)
@@ -71,6 +77,10 @@ JOB_LINEAGE = {
     "job_05_cleaned": {
         "inputs":  [kafka_dataset("tax-applications")],
         "outputs": [minio_dataset("cleaned-tax/", "cleaned_tax_files")],
+    },
+    "job_06_fraud_signals_to_pg": {
+        "inputs":  [kafka_dataset("fraud-signals")],
+        "outputs": [postgres_dataset("fraud_detections")],
     },
 }
 

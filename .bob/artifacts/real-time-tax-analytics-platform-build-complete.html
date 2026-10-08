@@ -1,0 +1,226 @@
+
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Platform Build Complete</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; line-height: 1.5; }
+  h1 { font-size: 1.7rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.25rem; }
+  .subtitle { color: #94a3b8; font-size: 0.9rem; margin-bottom: 2rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 1rem 1.2rem; }
+  .card-title { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-bottom: 0.6rem; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; margin-right: 4px; margin-bottom: 4px; }
+  .done  { background: #14532d; color: #86efac; }
+  .file  { background: #1e3a5f; color: #93c5fd; }
+  .port  { background: #312e81; color: #c4b5fd; }
+  .file-list { font-size: 0.8rem; color: #94a3b8; }
+  .file-list li { margin: 3px 0; list-style: none; padding-left: 0.8rem; position: relative; }
+  .file-list li::before { content: '→'; position: absolute; left: 0; color: #475569; }
+  .status-row { display: flex; align-items: center; gap: 0.5rem; margin: 4px 0; font-size: 0.82rem; }
+  .tick { color: #22c55e; font-weight: 700; }
+  .arch { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 1.2rem; margin-bottom: 1.5rem; font-family: 'Courier New', monospace; font-size: 0.75rem; color: #94a3b8; white-space: pre; overflow-x: auto; }
+  .section-head { font-size: 1rem; font-weight: 700; color: #93c5fd; margin: 1.5rem 0 0.8rem; border-bottom: 1px solid #334155; padding-bottom: 0.4rem; }
+  .cmd { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 0.6rem 1rem; font-family: 'Courier New', monospace; font-size: 0.78rem; color: #a5f3fc; margin: 0.4rem 0; }
+  .commit-list { font-size: 0.78rem; color: #94a3b8; }
+  .commit-list li { margin: 3px 0; list-style: none; }
+  .hash { color: #fbbf24; font-family: monospace; }
+</style>
+</head>
+<body>
+
+<h1>🏛️ Real-Time Tax Analytics Platform</h1>
+<p class="subtitle">All 10 sub-tasks complete · Pushed to github.com/Shotza247/Data-Streaming · main branch</p>
+
+<div class="section-head">Platform Architecture</div>
+<div class="arch">Producers (4×, 1 event/s each)
+    │  tax-applications · taxpayer-profiles · fraud-signals · audit-events
+    ▼
+Kafka (bitnami/kafka:3.6)  ←── Kafka UI :8080
+    │
+    ├── Flink Job 01 ──────────────► MinIO raw-tax/          (raw archival)
+    ├── Flink Job 02 ──────────────► PostgreSQL enriched_tax_applications  (temporal JOIN)
+    ├── Flink Job 03 ──────────────► PostgreSQL tax_kpi_windows ──► Redis  (5-min tumbling windows)
+    ├── Flink Job 04 ──────────────► Kafka fraud-signals     (CEP: HF submitter + income spike)
+    └── Flink Job 05 ──────────────► MinIO cleaned-tax/      (UPPER/TRIM + NULL filter)
+                                           │
+                           ┌───────────────┼──────────────────┐
+                           ▼               ▼                  ▼
+                     DuckDB OLAP     Qdrant vectors      MLflow RF model
+                      (6 queries)  fraud_similarity      (fraud-detector
+                           │         regulatory_kb        Staging→Prod)
+                           └──────────────┬───────────────────┘
+                                          ▼
+                                 Streamlit :8501
+                                 (5 live tabs)
+                                          │
+                                LangGraph Agents
+                               Supervisor → FraudAgent
+                                         → TaxQAAgent (flan-t5)
+
+OpenLineage events → Marquez :5000 → MarquezWeb :3000</div>
+
+<div class="section-head">Completed Sub-Tasks</div>
+<div class="grid">
+
+  <div class="card">
+    <div class="card-title">✅ Sub-Task 1 — Infrastructure</div>
+    <ul class="file-list">
+      <li>docker-compose.yml · 17 services on streaming-net</li>
+      <li>.env · Makefile · README.md</li>
+      <li>docker/build/flink · mlflow · streamlit Containerfiles</li>
+      <li>docker/init-postgres.sql · minio-init.sh</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✅ Sub-Task 2 — Kafka Producers</div>
+    <ul class="file-list">
+      <li>producers/producer_tax_applications.py</li>
+      <li>producers/producer_taxpayer_profiles.py</li>
+      <li>producers/producer_fraud_signals.py</li>
+      <li>producers/producer_audit_events.py</li>
+      <li>producers/base_producer.py · topic_init.py · Containerfile</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✅ Sub-Task 3 — Flink SQL Jobs</div>
+    <ul class="file-list">
+      <li>flink-jobs/job_01_raw_to_minio.sql</li>
+      <li>flink-jobs/job_02_enrich.sql (temporal JOIN)</li>
+      <li>flink-jobs/job_03_kpi_windows.sql (5-min tumbling)</li>
+      <li>flink-jobs/job_04_fraud_pattern.sql (CEP)</li>
+      <li>flink-jobs/job_05_cleaned.sql (UPPER/TRIM)</li>
+      <li>scripts/submit_flink_jobs.py · kpi_to_redis.py</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✅ Sub-Task 4 — Storage Layer</div>
+    <ul class="file-list">
+      <li>storage/postgres_schema.sql (4 tables + 2 views)</li>
+      <li>storage/duckdb_queries.py (6 OLAP functions)</li>
+      <li>storage/minio_client.py (boto3 wrapper)</li>
+      <li>storage/redis_schema.md (key naming + TTL docs)</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✅ Sub-Task 5 — Qdrant Vector Store</div>
+    <ul class="file-list">
+      <li>agents/embeddings.py (all-MiniLM-L6-v2 384-dim)</li>
+      <li>agents/embed_tax_records.py → fraud_similarity</li>
+      <li>agents/embed_regulatory_kb.py → 50 SA tax law chunks</li>
+      <li>agents/qdrant_search.py (search_similar_fraud, search_regulatory_kb)</li>
+      <li>scripts/seed_qdrant.py (Risk 3 preflight guard)</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✅ Sub-Task 6 — MLflow</div>
+    <ul class="file-list">
+      <li>mlflow/mlflow_config.py (tracking URI, S3, experiment names)</li>
+      <li>mlflow/train_fraud_model.py (RF + confusion matrix + registry)</li>
+      <li>mlflow/promote_model.py (Staging → Production)</li>
+      <li>Synthetic fallback data when MinIO empty</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✅ Sub-Task 7 — LangGraph Agents</div>
+    <ul class="file-list">
+      <li>agents/llm_wrapper.py (flan-t5-base text2text, CPU-only)</li>
+      <li>agents/supervisor.py (keyword routing node)</li>
+      <li>agents/fraud_agent.py (MLflow inference + Qdrant similarity)</li>
+      <li>agents/qa_agent.py (RAG: Qdrant KB + flan-t5 generation)</li>
+      <li>agents/langgraph_app.py (StateGraph, conditional edges, run())</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✅ Sub-Tasks 8A+8B — Data Lineage</div>
+    <ul class="file-list">
+      <li>lineage/openlineage_client.py (start/complete/fail → Marquez)</li>
+      <li>lineage/lineage_schemas.py (dataset builders for all storage types)</li>
+      <li>lineage/verify_lineage.py (full DAG validation)</li>
+      <li>All 5 Flink jobs + MLflow training emit OpenLineage events</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✅ Sub-Task 9 — Live Dashboard</div>
+    <ul class="file-list">
+      <li>Tab 1: Redis KPIs + DuckDB trend + income histogram</li>
+      <li>Tab 2: PostgreSQL fraud + DuckDB province heatmap + top customers</li>
+      <li>Tab 3: LangGraph agent chat (fraud check + tax Q&amp;A)</li>
+      <li>Tab 4: Marquez API lineage table + iframe embed</li>
+      <li>Tab 5: MLflow experiment runs + model stage badge</li>
+      <li>30-second autorefresh · all tabs graceful-fallback to demo data</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✅ Sub-Task 10 — Docs + Smoke Tests</div>
+    <ul class="file-list">
+      <li>scripts/smoke_test.py (8 components, 4 critical checks)</li>
+      <li>DEMO.md (10-step walkthrough + architecture diagram)</li>
+      <li>tests/test_subtask*.log for every sub-task</li>
+      <li>audit.md with 10 build entries</li>
+    </ul>
+  </div>
+
+</div>
+
+<div class="section-head">Key Makefile Commands</div>
+<div class="cmd">make up                  # Start full stack (17 containers)</div>
+<div class="cmd">make init-topics         # Create 4 Kafka topics</div>
+<div class="cmd">make producers-up        # Start 4 tax domain producers</div>
+<div class="cmd">make flink-up            # Start Flink cluster + SQL client</div>
+<div class="cmd">make submit-sql          # Submit all 5 Flink SQL jobs</div>
+<div class="cmd">make kpi-poller-up       # Start Redis KPI cache poller</div>
+<div class="cmd">make seed                # Seed Qdrant (both collections)</div>
+<div class="cmd">make train               # Train MLflow fraud model</div>
+<div class="cmd">make promote             # Promote Staging → Production</div>
+<div class="cmd">make smoke-test          # Full 8-component integration test</div>
+<div class="cmd">make verify-lineage      # Validate Marquez lineage DAG</div>
+<div class="cmd">make reset               # Wipe volumes + restart from scratch</div>
+
+<div class="section-head">Service Ports</div>
+<div class="grid">
+  <div class="card">
+    <div class="status-row"><span class="badge port">:8501</span> Streamlit Dashboard</div>
+    <div class="status-row"><span class="badge port">:8080</span> Kafka UI</div>
+    <div class="status-row"><span class="badge port">:8081</span> Flink Job Manager</div>
+    <div class="status-row"><span class="badge port">:3000</span> Marquez Web (Lineage)</div>
+    <div class="status-row"><span class="badge port">:5000</span> Marquez API</div>
+    <div class="status-row"><span class="badge port">:5001</span> MLflow Tracking</div>
+    <div class="status-row"><span class="badge port">:9001</span> MinIO Console</div>
+    <div class="status-row"><span class="badge port">:6333</span> Qdrant REST</div>
+    <div class="status-row"><span class="badge port">:5432</span> PostgreSQL</div>
+    <div class="status-row"><span class="badge port">:6379</span> Redis</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Open-Source Tools Used</div>
+    <div class="status-row"><span class="tick">✓</span> Apache Kafka (bitnami:3.6)</div>
+    <div class="status-row"><span class="tick">✓</span> Apache Flink SQL 1.18</div>
+    <div class="status-row"><span class="tick">✓</span> PostgreSQL 15 + DuckDB 0.10</div>
+    <div class="status-row"><span class="tick">✓</span> Redis 7 · MinIO (S3-compatible)</div>
+    <div class="status-row"><span class="tick">✓</span> Qdrant · sentence-transformers</div>
+    <div class="status-row"><span class="tick">✓</span> MLflow 2.13 + scikit-learn</div>
+    <div class="status-row"><span class="tick">✓</span> LangGraph + flan-t5-base (CPU)</div>
+    <div class="status-row"><span class="tick">✓</span> OpenLineage + Marquez 0.47</div>
+    <div class="status-row"><span class="tick">✓</span> Streamlit + Plotly</div>
+    <div class="status-row"><span class="tick">✓</span> Podman (not Docker)</div>
+  </div>
+</div>
+
+<p style="margin-top:1.5rem;color:#475569;font-size:0.78rem">
+  All commits pushed to github.com/Shotza247/Data-Streaming · main branch ·
+  10 test logs · audit.md with 10 entries · DEMO.md walkthrough included
+</p>
+
+</body>
+</html>

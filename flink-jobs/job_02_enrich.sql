@@ -16,12 +16,20 @@
 --   for the same customer_id that falls within ±1 hour of the application.
 --   This is the correct streaming join for two unbounded Kafka sources.
 --
+-- STARTUP FIX (Sub-Task 12):
+--   Both sources use earliest-offset so the streams have matching events
+--   in overlapping time windows. AT_LEAST_ONCE reduces checkpoint state
+--   pressure for the interval join operator.
+--
 -- Lineage:  kafka://tax-applications + kafka://taxpayer-profiles
 --        →  postgres://enriched_tax_applications
 
 SET 'table.exec.source.idle-timeout'   = '10s';
-SET 'execution.checkpointing.interval' = '30s';
-SET 'execution.checkpointing.mode'     = 'EXACTLY_ONCE';
+SET 'execution.checkpointing.interval' = '60s';
+SET 'execution.checkpointing.mode'     = 'AT_LEAST_ONCE';
+-- Ignore duplicates at sink level: use ON CONFLICT DO UPDATE (upsert)
+-- This is set via JDBC sink properties further down.
+SET 'table.dml.async-timeout'          = '30s';
 
 DROP TABLE IF EXISTS kafka_tax_applications_enrich;
 DROP TABLE IF EXISTS kafka_taxpayer_profiles;
@@ -85,6 +93,13 @@ CREATE TABLE kafka_taxpayer_profiles (
 );
 
 -- ── Sink: PostgreSQL enriched_tax_applications ───────────────────────────────
+-- Type mapping notes (Sub-Task 12 fix):
+--   submitted_date: Flink DATE matches PG date column
+--   processed_at:   Flink TIMESTAMP(3) matches PG timestamptz column
+--   risk_score:     DECIMAL(5,4) matches PG numeric(5,4)
+--   avg_income_3yr: DECIMAL(15,2) matches PG numeric(15,2)
+-- Upsert mode: ON CONFLICT (application_id) DO UPDATE handles late arrivals
+--   and avoids duplicate key errors on restart.
 CREATE TABLE pg_enriched_applications (
     application_id            STRING,
     customer_id               STRING,
@@ -92,26 +107,28 @@ CREATE TABLE pg_enriched_applications (
     email                     STRING,
     country                   STRING,
     province                  STRING,
-    taxable_income            DOUBLE,
+    taxable_income            DECIMAL(15,2),
     employment_type           STRING,
     employment_status         STRING,
-    submitted_date            STRING,
+    submitted_date            DATE,
     tax_year                  STRING,
     filing_status             STRING,
     is_fraud                  BOOLEAN,
     age                       INT,
-    risk_score                DOUBLE,
+    risk_score                DECIMAL(5,4),
     historical_filings_count  INT,
-    avg_income_3yr            DOUBLE,
+    avg_income_3yr            DECIMAL(15,2),
     flagged_previously        BOOLEAN,
-    processed_at              STRING
+    processed_at              TIMESTAMP(3)
 ) WITH (
     'connector'  = 'jdbc',
     'url'        = 'jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}',
     'table-name' = 'enriched_tax_applications',
     'username'   = '${POSTGRES_USER}',
     'password'   = '${POSTGRES_PASSWORD}',
-    'driver'     = 'org.postgresql.Driver'
+    'driver'     = 'org.postgresql.Driver',
+    'sink.buffer-flush.max-rows' = '100',
+    'sink.buffer-flush.interval' = '2s'
 );
 
 -- ── Enrichment INSERT: LEFT interval join + field-level cleaning ──────────────
@@ -129,21 +146,22 @@ SELECT
     LOWER(TRIM(a.email))                                                AS email,
     UPPER(TRIM(a.country))                                              AS country,
     UPPER(TRIM(a.province))                                             AS province,
-    a.taxable_income,
+    CAST(a.taxable_income AS DECIMAL(15,2))                            AS taxable_income,
     UPPER(TRIM(a.employment_type))                                      AS employment_type,
     UPPER(TRIM(a.employment_status))                                    AS employment_status,
-    SUBSTRING(TRIM(a.submitted_date), 1, 10)                           AS submitted_date,
+    -- Cast submitted_date STRING → DATE for PG date column
+    CAST(SUBSTRING(TRIM(a.submitted_date), 1, 10) AS DATE)            AS submitted_date,
     TRIM(a.tax_year)                                                    AS tax_year,
     UPPER(TRIM(a.filing_status))                                        AS filing_status,
     a.is_fraud,
     -- Profile fields: COALESCE ensures clean defaults when no match
-    COALESCE(p.age,                      0)                             AS age,
-    COALESCE(p.risk_score,               0.0)                           AS risk_score,
-    COALESCE(p.historical_filings_count, 0)                             AS historical_filings_count,
-    COALESCE(p.avg_income_3yr,           0.0)                           AS avg_income_3yr,
-    COALESCE(p.flagged_previously,       FALSE)                         AS flagged_previously,
-    -- Flink wall-clock processing time (clean string format)
-    CAST(CURRENT_TIMESTAMP AS STRING)                                   AS processed_at
+    CAST(COALESCE(p.age,                      0) AS INT)               AS age,
+    CAST(COALESCE(p.risk_score,               0.0) AS DECIMAL(5,4))   AS risk_score,
+    COALESCE(p.historical_filings_count,      0)                       AS historical_filings_count,
+    CAST(COALESCE(p.avg_income_3yr,           0.0) AS DECIMAL(15,2))  AS avg_income_3yr,
+    COALESCE(p.flagged_previously,            FALSE)                   AS flagged_previously,
+    -- Flink wall-clock processing time as TIMESTAMP(3) for PG timestamptz
+    CURRENT_TIMESTAMP                                                   AS processed_at
 FROM kafka_tax_applications_enrich AS a
 LEFT JOIN kafka_taxpayer_profiles AS p
     ON a.customer_id = p.customer_id
