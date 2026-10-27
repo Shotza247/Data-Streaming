@@ -42,7 +42,7 @@ def _get_duckdb_trend(n_windows=12):
     """Query DuckDB → MinIO cleaned-tax for trend data via storage module. Returns DataFrame or None."""
     try:
         import sys
-        sys.path.insert(0, "/app")
+        sys.path.insert(0, "/")
         from storage.duckdb_queries import get_tax_kpi_trend
         df = get_tax_kpi_trend(n_windows=n_windows)
         return df if not df.empty else None
@@ -54,7 +54,7 @@ def _get_income_distribution():
     """Get income distribution data via storage module. Returns DataFrame or None."""
     try:
         import sys
-        sys.path.insert(0, "/app")
+        sys.path.insert(0, "/")
         from storage.duckdb_queries import get_income_distribution
         df = get_income_distribution(n_buckets=20)
         return df if not df.empty else None

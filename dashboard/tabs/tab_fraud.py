@@ -51,7 +51,7 @@ def _get_duckdb_fraud_summary():
     """Aggregate fraud signals from MinIO via DuckDB storage module. Returns DataFrame or None."""
     try:
         import sys
-        sys.path.insert(0, "/app")
+        sys.path.insert(0, "/")
         from storage.duckdb_queries import get_province_fraud_heatmap
         df = get_province_fraud_heatmap()
         # Rename columns to match what the rest of this tab expects
@@ -68,7 +68,7 @@ def _get_top_customers():
     """Return top flagged customers via DuckDB storage module."""
     try:
         import sys
-        sys.path.insert(0, "/app")
+        sys.path.insert(0, "/")
         from storage.duckdb_queries import get_top_flagged_customers
         df = get_top_flagged_customers(top_n=10)
         return df if not df.empty else None
