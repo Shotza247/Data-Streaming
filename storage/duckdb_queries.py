@@ -41,8 +41,47 @@ BUCKET_CLEANED   = os.getenv("MINIO_BUCKET_CLEANED", "cleaned-tax")
 _endpoint_host = MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
 _use_ssl       = MINIO_ENDPOINT.startswith("https://")
 
-# Path inside MinIO where Flink job_05 writes cleaned JSON files
-CLEANED_GLOB = f"s3://{BUCKET_CLEANED}/**/*.json"
+# Path inside MinIO where Flink job_05 writes cleaned JSON files.
+# The Flink filesystem sink names files "part-<uuid>-<n>-<n>" (no extension),
+# partitioned as dt=YYYY-MM-DD/. Match "part-*" to skip the empty _SUCCESS markers.
+CLEANED_GLOB = f"s3://{BUCKET_CLEANED}/dt=*/part-*"
+
+# The Flink sink produces many small files (one per partition per checkpoint),
+# and DuckDB opens one HTTP connection per file. Reading all of them exhausts
+# ephemeral ports, so queries read only the newest N dt= partitions.
+RECENT_PARTITIONS = int(os.getenv("CLEANED_RECENT_PARTITIONS", "7"))
+
+
+def _cleaned_source() -> str:
+    """
+    Return the SQL table expression for the cleaned layer, limited to the
+    newest RECENT_PARTITIONS partitions. Falls back to the full glob if the
+    partition listing fails.
+    """
+    try:
+        import boto3
+        endpoint = MINIO_ENDPOINT if "://" in MINIO_ENDPOINT else f"http://{MINIO_ENDPOINT}"
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=MINIO_ACCESS_KEY,
+            aws_secret_access_key=MINIO_SECRET_KEY,
+            region_name="us-east-1",
+        )
+        prefixes = []
+        for page in s3.get_paginator("list_objects_v2").paginate(
+            Bucket=BUCKET_CLEANED, Delimiter="/"
+        ):
+            prefixes += [p["Prefix"] for p in page.get("CommonPrefixes", [])]
+        newest = sorted(prefixes)[-RECENT_PARTITIONS:]
+        if newest:
+            globs = [f"s3://{BUCKET_CLEANED}/{p}part-*" for p in newest]
+            return f"read_json_auto({globs!r}, union_by_name=true)"
+    except Exception as exc:
+        log.warning(f"Partition listing failed, falling back to full glob: {exc}")
+    return f"read_json_auto('{CLEANED_GLOB}', union_by_name=true)"
+
+
 
 
 # ── DuckDB connection factory ─────────────────────────────────────────────────
@@ -117,7 +156,7 @@ def get_tax_kpi_trend(n_windows: int = 24):
             AVG(taxable_income)        AS avg_income,
             SUM(CASE WHEN is_fraud = TRUE THEN 1 ELSE 0 END) AS fraud_count,
             AVG(CASE WHEN is_fraud = TRUE THEN 1.0 ELSE 0.0 END) AS fraud_rate
-        FROM read_json_auto('{CLEANED_GLOB}', union_by_name=true)
+        FROM {_cleaned_source()}
         WHERE processed_at IS NOT NULL
         GROUP BY 1
         ORDER BY 1 DESC
@@ -145,7 +184,7 @@ def get_fraud_summary():
             END                                        AS severity,
             province,
             COUNT(*)                                   AS count
-        FROM read_json_auto('{CLEANED_GLOB}', union_by_name=true)
+        FROM {_cleaned_source()}
         WHERE is_fraud = TRUE
         GROUP BY 1, 2, 3
         ORDER BY count DESC
@@ -174,7 +213,7 @@ def get_cleaned_data_for_ml(n_rows: int = 50000):
             COALESCE(employment_status, 'UNKNOWN') AS employment_status,
             COALESCE(filing_status, 'UNKNOWN')     AS filing_status,
             COALESCE(is_fraud, false)              AS is_fraud
-        FROM read_json_auto('{CLEANED_GLOB}', union_by_name=true)
+        FROM {_cleaned_source()}
         WHERE application_id IS NOT NULL
           AND taxable_income >= 0
         LIMIT {n_rows}
@@ -200,7 +239,7 @@ def get_income_distribution(n_buckets: int = 20):
             SELECT
                 MIN(taxable_income) AS mn,
                 MAX(taxable_income) AS mx
-            FROM read_json_auto('{CLEANED_GLOB}', union_by_name=true)
+            FROM {_cleaned_source()}
             WHERE taxable_income IS NOT NULL AND taxable_income >= 0
         ),
         bucketed AS (
@@ -209,7 +248,7 @@ def get_income_distribution(n_buckets: int = 20):
                 taxable_income,
                 mn,
                 mx
-            FROM read_json_auto('{CLEANED_GLOB}', union_by_name=true)
+            FROM {_cleaned_source()}
             CROSS JOIN bounds
             WHERE taxable_income IS NOT NULL AND taxable_income >= 0
         )
@@ -245,7 +284,7 @@ def get_top_flagged_customers(top_n: int = 10):
             COUNT(*)                                    AS fraud_count,
             ROUND(AVG(taxable_income), 2)               AS avg_income,
             STRING_AGG(DISTINCT province, ', ')         AS provinces
-        FROM read_json_auto('{CLEANED_GLOB}', union_by_name=true)
+        FROM {_cleaned_source()}
         WHERE is_fraud = TRUE
         GROUP BY customer_id
         ORDER BY fraud_count DESC
@@ -273,7 +312,7 @@ def get_province_fraud_heatmap():
                 4
             )                                             AS fraud_rate,
             ROUND(AVG(taxable_income), 2)                 AS avg_income
-        FROM read_json_auto('{CLEANED_GLOB}', union_by_name=true)
+        FROM {_cleaned_source()}
         GROUP BY province
         ORDER BY fraud_count DESC
     """
