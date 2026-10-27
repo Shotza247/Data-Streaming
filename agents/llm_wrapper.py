@@ -1,204 +1,180 @@
 """
 agents/llm_wrapper.py
 ----------------------
-LLM backend using the HuggingFace Inference API (free hosted models).
-No local model download or GPU required — all inference is done via
-the HuggingFace REST API using your free account token.
+LLM access for the agents via LiteLLM, governed by a token budget.
 
-Default model: mistralai/Mixtral-8x7B-Instruct-v0.1
-  - Free tier on HuggingFace Inference API
-  - Excellent instruction-following, great for tax Q&A
-  - Falls back to: HuggingFaceH4/zephyr-7b-beta (also free)
-  - Final fallback: google/flan-t5-base (text2text, very lightweight)
+Routing and limits live in agents/litellm_config.yaml; the policy itself is in
+agents/token_budget.py:
+
+    HuggingFace 20,000 tokens -> OpenAI 10,000 tokens -> HuggingFace ... (loop)
+    until HuggingFace has used 100,000 and OpenAI 50,000 in total.
+
+When a provider errors (quota, rate limit, auth, outage) the call fails over to
+the other provider and the failed one is skipped for a cooldown. When both
+budgets are used up, generate() raises ByoRequired so the UI can ask the user to
+supply their own model/provider (bring-your-own calls are not counted).
 
 Environment variables:
-    HF_API_TOKEN    Your HuggingFace token (https://huggingface.co/settings/tokens)
-                    Free account works — no payment required.
-    HF_MODEL_LLM    Override the model (default: mistralai/Mixtral-8x7B-Instruct-v0.1)
+    HF_API_TOKEN, HF_MODEL_LLM      HuggingFace provider
+    OPENAI_API_KEY, OPENAI_MODEL    OpenAI provider
+    LLM_FORCE_PROVIDER              dev switch: "openai" or "huggingface" sends every
+                                    call to that provider (still counted against its cap)
+    LITELLM_CONFIG, LLM_BUDGET_STATE  optional paths
 
 Exposes:
-    generate(prompt, max_new_tokens=512)   -> str
-    classify_intent(user_input)            -> "fraud_check" | "tax_question"
-    get_model_info()                       -> dict  (model name, backend, status)
+    generate(prompt, max_new_tokens=512, llm_override=None)  -> str   (raises ByoRequired)
+    classify_intent(user_input)                              -> "fraud_check" | "tax_question"
+    get_model_info()                                         -> dict
+    get_budget()                                             -> TokenBudget
 """
 
-import os
 import logging
-import requests
+
+from agents.token_budget import TokenBudget, estimate_tokens, load_config, resolve_env
 
 log = logging.getLogger(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────────────
-HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")
-
-# Primary: Mixtral (great instruction following, free tier)
-# Set HF_MODEL_LLM env var to override
-HF_MODEL_LLM = os.getenv(
-    "HF_MODEL_LLM",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
+BYO_MESSAGE = (
+    "The built-in AI token allowance has been used up (HuggingFace 100,000 and "
+    "OpenAI 50,000 tokens). To keep going, connect your own model/provider in the "
+    "AI Agent Chat settings (model name, API key, and optional API base URL)."
 )
 
-# Fallback chain if primary is unavailable / rate-limited
-_FALLBACK_MODELS = [
-    "HuggingFaceH4/zephyr-7b-beta",
-    "mistralai/Mistral-7B-Instruct-v0.2",
-    "google/flan-t5-xxl",
-]
+_config = None
+_budget = None
+_last = {"model": "—", "backend": "unknown"}
 
-HF_API_BASE = "https://api-inference.huggingface.co/models"
 
-# ── Backend status (set at first call) ───────────────────────────────────────
-_backend_status = "unknown"   # "api" | "local" | "unavailable"
-_active_model   = HF_MODEL_LLM
+class ByoRequired(Exception):
+    """Raised when the built-in token budget is exhausted and no override is given."""
+
+
+def get_budget() -> TokenBudget:
+    global _config, _budget
+    if _budget is None:
+        _config = load_config()
+        _budget = TokenBudget(_config)
+    return _budget
+
+
+def _provider_call_params(name: str) -> dict:
+    """Resolve a provider's LiteLLM kwargs from litellm_config.yaml."""
+    get_budget()
+    model_name = get_budget().providers[name]["model_name"]
+    entry = next(m for m in _config["model_list"] if m["model_name"] == model_name)
+    params = dict(entry["litellm_params"])
+    model = resolve_env(params.pop("model"))
+    provider = params.pop("custom_llm_provider", name)
+    api_key = resolve_env(params.pop("api_key", None))
+    kwargs = {k: resolve_env(v) for k, v in params.items()}
+    return {"model": f"{provider}/{model}" if model else None, "api_key": api_key, "extra": kwargs}
+
+
+def _completion(model, api_key, api_base, prompt, max_tokens, extra):
+    import litellm
+    litellm.drop_params = True          # ignore params a given model does not support
+    return litellm.completion(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        api_key=api_key,
+        api_base=api_base or None,
+        max_tokens=max_tokens,
+        timeout=60,
+        num_retries=0,                  # failover is handled here, not by LiteLLM
+        **(extra or {}),
+    )
+
+
+def _text_and_tokens(resp, prompt: str):
+    text = (resp.choices[0].message.content or "").strip()
+    usage = getattr(resp, "usage", None)
+    tokens = getattr(usage, "total_tokens", None) if usage else None
+    if not tokens:
+        tokens = estimate_tokens(prompt) + estimate_tokens(text)
+    return text, int(tokens)
 
 
 def get_model_info() -> dict:
-    """Return current backend info for display in the dashboard."""
-    return {
-        "model":   _active_model,
-        "backend": _backend_status,
-        "token":   "configured" if HF_API_TOKEN else "missing",
+    """Backend info + budget status for the dashboard."""
+    import os
+    info = {
+        "model":   _last["model"],
+        "backend": _last["backend"],     # "api" | "byo" | "unavailable" | "unknown"
+        "token":   "configured" if (os.getenv("HF_API_TOKEN") or os.getenv("OPENAI_API_KEY")) else "missing",
     }
+    try:
+        info["budget"] = get_budget().status()
+    except Exception as exc:
+        info["budget_error"] = str(exc)
+    return info
 
 
-# ── HuggingFace Inference API call ────────────────────────────────────────────
-
-def _hf_api_generate(model: str, prompt: str, max_new_tokens: int = 512) -> str:
-    """
-    Call the HuggingFace Inference API for text generation.
-    Returns generated text or raises on failure.
-    """
-    headers = {"Content-Type": "application/json"}
-    if HF_API_TOKEN:
-        headers["Authorization"] = f"Bearer {HF_API_TOKEN}"
-
-    # Instruction-tuned models use a chat-style payload
-    payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens":  max_new_tokens,
-            "temperature":     0.3,
-            "return_full_text": False,
-            "do_sample":       True,
-        },
-        "options": {
-            "wait_for_model": True,   # don't fail if model is cold-starting
-            "use_cache":      True,
-        },
-    }
-
-    url  = f"{HF_API_BASE}/{model}"
-    resp = requests.post(url, headers=headers, json=payload, timeout=60)
-
-    if resp.status_code == 503:
-        raise RuntimeError(f"Model {model} is loading (503). Retry in ~20s.")
-    if resp.status_code == 429:
-        raise RuntimeError(f"Rate limited on {model} (429). Try again shortly.")
-    if resp.status_code == 401:
-        raise RuntimeError("HF_API_TOKEN is invalid or missing. Set it in .env")
-    if resp.status_code != 200:
-        raise RuntimeError(f"HF API error {resp.status_code}: {resp.text[:200]}")
-
-    data = resp.json()
-
-    # Different model families return different shapes
-    if isinstance(data, list) and data:
-        first = data[0]
-        # text-generation models
-        if "generated_text" in first:
-            return first["generated_text"].strip()
-        # text2text models
-        if "translation_text" in first:
-            return first["translation_text"].strip()
-    if isinstance(data, dict) and "generated_text" in data:
-        return data["generated_text"].strip()
-
-    raise RuntimeError(f"Unexpected HF API response shape: {str(data)[:200]}")
-
-
-# ── Local pipeline fallback (lightweight flan-t5-base) ────────────────────────
-
-_local_pipeline = None
-
-def _local_generate(prompt: str, max_new_tokens: int = 256) -> str:
-    """
-    Last-resort fallback: use a local HuggingFace transformers pipeline.
-    Uses flan-t5-base (80MB) — only loaded if API is unavailable.
-    """
-    global _local_pipeline
-    if _local_pipeline is None:
-        try:
-            from transformers import pipeline as hf_pipeline
-            log.info("Loading local fallback model: google/flan-t5-base")
-            _local_pipeline = hf_pipeline(
-                task="text2text-generation",
-                model="google/flan-t5-base",
-                device=-1,
-                max_new_tokens=max_new_tokens,
-            )
-            log.info("Local fallback model loaded.")
-        except Exception as exc:
-            raise RuntimeError(f"Local fallback also unavailable: {exc}") from exc
-
-    outputs = _local_pipeline(prompt, max_new_tokens=max_new_tokens, do_sample=False)
-    return outputs[0]["generated_text"].strip()
-
-
-# ── Public generate() ─────────────────────────────────────────────────────────
-
-def generate(prompt: str, max_new_tokens: int = 512) -> str:
+def generate(prompt: str, max_new_tokens: int = 512, llm_override: dict = None) -> str:
     """
     Generate a response to `prompt`.
 
-    Strategy:
-      1. Try HF Inference API with primary model (HF_MODEL_LLM)
-      2. On failure, try each fallback model in _FALLBACK_MODELS
-      3. If all API calls fail, try local flan-t5-base (if transformers installed)
-      4. Return an informative error string if everything fails
+    llm_override: {"model": "...", "api_key": "...", "api_base": "..."} -> bring-your-own
+                  provider. Used as-is and NOT counted against the built-in budget.
 
-    Returns the generated text string.
+    Raises ByoRequired when the built-in budget is exhausted and no override is given.
+    Returns an "[LLM unavailable] ..." string if providers are configured but all failed.
     """
-    global _backend_status, _active_model
-
-    # ── 1. Try HF Inference API ────────────────────────────────────────────────
-    if HF_API_TOKEN or True:   # attempt API even without token (rate-limited but works for light use)
-        models_to_try = [HF_MODEL_LLM] + [m for m in _FALLBACK_MODELS if m != HF_MODEL_LLM]
-        for model in models_to_try:
-            try:
-                result = _hf_api_generate(model, prompt, max_new_tokens)
-                _backend_status = "api"
-                _active_model   = model
-                log.info(f"HF API response from {model} ({len(result)} chars)")
-                return result
-            except RuntimeError as exc:
-                log.warning(f"HF API [{model}] failed: {exc}")
-                continue
-            except Exception as exc:
-                log.warning(f"HF API [{model}] unexpected error: {exc}")
-                continue
-
-    # ── 2. Local fallback ──────────────────────────────────────────────────────
-    try:
-        log.info("All HF API models failed — attempting local flan-t5-base fallback")
-        result = _local_generate(prompt, max_new_tokens=min(max_new_tokens, 256))
-        _backend_status = "local"
-        _active_model   = "google/flan-t5-base (local)"
-        return result
-    except Exception as exc:
-        log.error(f"Local fallback failed: {exc}")
-
-    # ── 3. Give up gracefully ──────────────────────────────────────────────────
-    _backend_status = "unavailable"
-    if not HF_API_TOKEN:
-        return (
-            "[LLM unavailable] No HF_API_TOKEN set. "
-            "Get a free token at https://huggingface.co/settings/tokens "
-            "and add it to your .env file as HF_API_TOKEN=hf_..."
+    # ── Bring-your-own provider ────────────────────────────────────────────────
+    if llm_override and llm_override.get("model"):
+        resp = _completion(
+            llm_override["model"], llm_override.get("api_key"), llm_override.get("api_base"),
+            prompt, max_new_tokens, None,
         )
-    return (
-        "[LLM unavailable] All HuggingFace API models are currently rate-limited or loading. "
-        "Please try again in 30 seconds."
-    )
+        text, _ = _text_and_tokens(resp, prompt)
+        _last.update(model=llm_override["model"], backend="byo")
+        return text
+
+    # ── Built-in providers under the token budget ──────────────────────────────
+    budget = get_budget()
+    est_prompt = estimate_tokens(prompt)
+    plan = budget.plan(est_prompt)
+    if not plan:
+        _last.update(backend="unavailable")
+        status = budget.status()
+        if status["byo_required"]:
+            raise ByoRequired(BYO_MESSAGE)
+        waits = [f"{n} ({p['cooldown_s']}s)" for n, p in status["providers"].items() if p["cooldown_s"]]
+        return (
+            "[LLM unavailable] Providers are cooling down after errors"
+            + (f": {', '.join(waits)}" if waits else "")
+            + ". Token budget remains; try again shortly."
+        )
+
+    errors = []
+    for name in plan:
+        p = _provider_call_params(name)
+        if not p["api_key"] or not p["model"]:
+            budget.mark_failed(name, "missing API key or model in .env")
+            errors.append(f"{name}: missing API key or model")
+            continue
+        max_tokens = budget.max_completion(name, est_prompt, max_new_tokens)
+        try:
+            resp = _completion(p["model"], p["api_key"], None, prompt, max_tokens, p["extra"])
+            text, tokens = _text_and_tokens(resp, prompt)
+        except Exception as exc:
+            budget.mark_failed(name, f"{type(exc).__name__}: {exc}")
+            errors.append(f"{name}: {type(exc).__name__}")
+            log.warning(f"LLM [{name}] failed, trying next provider: {exc}")
+            continue
+
+        budget.record(name, tokens)          # count real usage even if text is empty
+        if not text:
+            errors.append(f"{name}: empty response")
+            continue
+        _last.update(model=p["model"], backend="api")
+        log.info(f"LLM [{name}] {p['model']} used {tokens} tokens")
+        return text
+
+    # Every attempted provider failed. If that exhausted the budget, ask for BYO.
+    _last.update(backend="unavailable")
+    if budget.status()["byo_required"]:
+        raise ByoRequired(BYO_MESSAGE)
+    return "[LLM unavailable] " + "; ".join(errors) + ". Check keys/quotas in .env, or try again shortly."
 
 
 # ── Intent classifier (no LLM needed — pure heuristic) ───────────────────────

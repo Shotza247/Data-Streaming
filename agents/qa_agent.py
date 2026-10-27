@@ -62,8 +62,15 @@ def qa_agent_node(state: dict) -> dict:
 
     # ── Generate answer ────────────────────────────────────────────────────────
     try:
-        from agents.llm_wrapper import generate
-        answer = generate(prompt, max_new_tokens=256)
+        from agents.llm_wrapper import generate, ByoRequired
+        try:
+            answer = generate(prompt, max_new_tokens=256, llm_override=state.get("llm_override"))
+        except ByoRequired as byo:
+            # Built-in token budget used up: tell the user how to continue.
+            state["response"] = str(byo)
+            state["sources"]  = sources
+            state["byo_required"] = True
+            return state
     except Exception as exc:
         log.warning(f"LLM generate failed: {exc}")
         # Graceful fallback: return the most relevant KB chunk directly

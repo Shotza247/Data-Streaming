@@ -41,6 +41,8 @@ class AgentState(TypedDict, total=False):
     question:         Optional[str]
     response:         str
     sources:          list
+    llm_override:     Optional[dict]   # bring-your-own {"model","api_key","api_base"}
+    byo_required:     bool             # built-in token budget exhausted
 
 
 # ── Graph compilation ─────────────────────────────────────────────────────────
@@ -102,19 +104,22 @@ def compile_graph():
 
 # ── Public run entry point ────────────────────────────────────────────────────
 
-def run(user_input: str) -> dict:
+def run(user_input: str, llm_override: Optional[dict] = None) -> dict:
     """
     Main entry point. Accepts a raw string from the user and returns
     a dict with "response" (str) and "sources" (list).
 
     Args:
-        user_input: Natural-language question or fraud check request.
+        user_input:   Natural-language question or fraud check request.
+        llm_override: Optional bring-your-own model, used when the built-in
+                      token budget is exhausted: {"model", "api_key", "api_base"}.
 
     Returns:
         {
             "response": "...",        # formatted answer string
             "sources":  [...],        # list of source references
             "intent":   "...",        # "fraud_check" | "tax_question"
+            "byo_required": bool,     # True -> UI should ask for own model/provider
         }
 
     On error: returns a graceful fallback response.
@@ -129,12 +134,15 @@ def run(user_input: str) -> dict:
             "question":         None,
             "response":         "",
             "sources":          [],
+            "llm_override":     llm_override,
+            "byo_required":     False,
         }
         final_state = graph.invoke(initial_state)
         return {
             "response": final_state.get("response", "No response generated."),
             "sources":  final_state.get("sources", []),
             "intent":   final_state.get("intent", "unknown"),
+            "byo_required": bool(final_state.get("byo_required", False)),
         }
     except Exception as exc:
         log.error(f"Agent graph failed: {exc}")
