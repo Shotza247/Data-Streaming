@@ -15,7 +15,7 @@ import sys
 def _agent_available() -> bool:
     """Check whether the LangGraph app module is importable."""
     try:
-        sys.path.insert(0, "/app")
+        sys.path.insert(0, "/")
         import importlib
         spec = importlib.util.find_spec("agents.langgraph_app")
         return spec is not None
@@ -23,12 +23,12 @@ def _agent_available() -> bool:
         return False
 
 
-def _run_agent(user_input: str) -> dict:
-    """Call the LangGraph agent. Returns {response, sources, intent}."""
+def _run_agent(user_input: str, llm_override: dict = None) -> dict:
+    """Call the LangGraph agent. Returns {response, sources, intent, byo_required}."""
     try:
-        sys.path.insert(0, "/app")
+        sys.path.insert(0, "/")
         from agents.langgraph_app import run
-        result = run(user_input)
+        result = run(user_input, llm_override=llm_override)
         return result
     except Exception as e:
         return {"response": f"Agent error: {e}", "sources": [], "intent": "error"}
@@ -37,16 +37,33 @@ def _run_agent(user_input: str) -> dict:
 def _get_model_info() -> dict:
     """Get current HF model / backend status."""
     try:
-        sys.path.insert(0, "/app")
+        sys.path.insert(0, "/")
         from agents.llm_wrapper import get_model_info
         return get_model_info()
     except Exception:
         return {"model": "unknown", "backend": "unknown", "token": "unknown"}
 
 
-def _hf_token_configured() -> bool:
-    """Check if HF_API_TOKEN is set in the environment."""
-    return bool(os.getenv("HF_API_TOKEN", "").strip())
+def _keys_configured() -> dict:
+    """Which built-in providers have credentials in the environment."""
+    return {
+        "huggingface": bool(os.getenv("HF_API_TOKEN", "").strip()),
+        "openai":      bool(os.getenv("OPENAI_API_KEY", "").strip()),
+    }
+
+
+def _set_provider_mode(mode: str) -> None:
+    """Dev switch: 'auto' rotates HF/OpenAI; otherwise force one provider (still capped)."""
+    try:
+        sys.path.insert(0, "/")
+        from agents.llm_wrapper import get_budget
+        get_budget().set_force_provider(None if mode == "auto" else mode)
+    except Exception:
+        pass
+
+
+def _fmt_tokens(n: int) -> str:
+    return f"{int(n):,}"
 
 
 # ── Canned demo responses (used when agent not importable) ───────────────────
@@ -109,8 +126,10 @@ def render():
     )
 
     agent_ready  = _agent_available()
-    token_ok     = _hf_token_configured()
+    keys         = _keys_configured()
     model_info   = _get_model_info()
+    budget       = model_info.get("budget")          # None if llm_wrapper not importable
+    byo          = st.session_state.get("byo_llm")   # {"model","api_key","api_base"} or None
 
     # ── Status banner ─────────────────────────────────────────────────────────
     col_a, col_b, col_c = st.columns(3)
@@ -120,49 +139,80 @@ def render():
         else:
             st.markdown('<span class="status-warn">&#9679; Agent modules not mounted</span>', unsafe_allow_html=True)
     with col_b:
-        if token_ok:
-            st.markdown('<span class="status-ok">&#9679; HF API token configured</span>', unsafe_allow_html=True)
+        if byo:
+            st.markdown('<span class="status-ok">&#9679; Using your own model</span>', unsafe_allow_html=True)
+        elif budget and budget["byo_required"]:
+            st.markdown('<span class="status-warn">&#9679; Token allowance used up</span>', unsafe_allow_html=True)
+        elif keys["huggingface"] or keys["openai"]:
+            n = sum(keys.values())
+            st.markdown(f'<span class="status-ok">&#9679; {n} provider key(s) configured</span>', unsafe_allow_html=True)
         else:
-            st.markdown('<span class="status-warn">&#9679; HF_API_TOKEN not set</span>', unsafe_allow_html=True)
+            st.markdown('<span class="status-warn">&#9679; No API keys set</span>', unsafe_allow_html=True)
     with col_c:
-        backend_colour = "status-ok" if model_info.get("backend") == "api" else "status-warn"
+        backend_colour = "status-ok" if model_info.get("backend") in ("api", "byo") else "status-warn"
         model_short = model_info.get("model", "—").split("/")[-1]
-        st.markdown(
-            f'<span class="{backend_colour}">&#9679; {model_short}</span>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<span class="{backend_colour}">&#9679; {model_short}</span>', unsafe_allow_html=True)
 
-    # ── Setup hint if no token ────────────────────────────────────────────────
-    if not token_ok and agent_ready:
-        st.info(
-            "**Set your HuggingFace API token** to enable the AI agent:\n\n"
-            "1. Get a free token at https://huggingface.co/settings/tokens\n"
-            "2. Add `HF_API_TOKEN=hf_your_token_here` to your `.env` file\n"
-            "3. Restart the Streamlit container: `podman restart streamlit`\n\n"
-            "The agent works without a token but may be rate-limited.",
-            icon="🔑",
-        )
-    elif not agent_ready:
+    if not agent_ready:
         st.info(
             "Agent modules are not yet mounted in this container. "
             "The chat is running in demo mode showing example responses.",
             icon="ℹ️",
         )
+    elif not (keys["huggingface"] or keys["openai"]) and not byo:
+        st.info(
+            "Add `HF_API_TOKEN` and/or `OPENAI_API_KEY` (with `OPENAI_MODEL`) to your `.env`, "
+            "then `podman compose up -d --force-recreate streamlit`.",
+            icon="🔑",
+        )
 
-    # ── Model info expander ───────────────────────────────────────────────────
-    if agent_ready:
-        with st.expander("⚙️ Agent configuration", expanded=False):
-            st.markdown(f"""
-| Setting | Value |
-|---|---|
-| **LLM Backend** | HuggingFace Inference API |
-| **Primary Model** | `{model_info.get('model', HF_MODEL_INFO_DEFAULT)}` |
-| **Fallback Models** | `zephyr-7b-beta` → `Mistral-7B-Instruct-v0.2` → `flan-t5-base (local)` |
-| **Token Status** | {'✅ Configured' if token_ok else '⚠️ Not set (set HF_API_TOKEN in .env)'} |
-| **Routing** | Keyword heuristic — no LLM call needed for routing |
-| **Fraud Agent** | MLflow `fraud-detector` + Qdrant `fraud_similarity` |
-| **Q&A Agent** | Qdrant `regulatory_kb` + HF API RAG |
-""")
+    # ── Token allowance + provider controls ───────────────────────────────────
+    if agent_ready and budget:
+        with st.expander("🔢 Token allowance & provider", expanded=bool(budget["byo_required"] and not byo)):
+            for name, label in (("huggingface", "HuggingFace"), ("openai", "OpenAI")):
+                p = budget["providers"][name]
+                st.progress(
+                    min(1.0, p["used"] / p["total"]),
+                    text=(f"{label}: {_fmt_tokens(p['used'])} / {_fmt_tokens(p['total'])} tokens used"
+                          f"  ·  current stint {_fmt_tokens(p['stint_used'])} / {_fmt_tokens(p['stint_tokens'])}"
+                          + (f"  ·  cooling down {p['cooldown_s']}s" if p["cooldown_s"] else "")),
+                )
+                if p["last_error"]:
+                    st.caption(f"{label} last error: {p['last_error']}")
+            st.caption(
+                "Rotation: HuggingFace 20,000 → OpenAI 10,000 → repeat, until HuggingFace has used "
+                "100,000 and OpenAI 50,000. Then bring your own model."
+            )
+
+            modes   = ["auto", "huggingface", "openai"]
+            current = budget["forced"] or "auto"
+            choice  = st.radio(
+                "Provider mode (dev)", modes, index=modes.index(current), horizontal=True,
+                help="auto = rotate. Choosing a provider sends every call there for testing. "
+                     "Its total cap still applies.",
+            )
+            if choice != current:
+                _set_provider_mode(choice)
+                st.rerun()
+
+            st.markdown("**Bring your own model**")
+            with st.form("byo_form", clear_on_submit=False):
+                m = st.text_input("Model (LiteLLM format)", value=(byo or {}).get("model", ""),
+                                  placeholder="openai/gpt-4o-mini  ·  anthropic/claude-sonnet-4  ·  ollama/llama3")
+                k = st.text_input("API key", value=(byo or {}).get("api_key", ""), type="password")
+                b = st.text_input("API base URL (optional)", value=(byo or {}).get("api_base", ""),
+                                  placeholder="https://your-endpoint/v1")
+                c1, c2 = st.columns(2)
+                save  = c1.form_submit_button("Use my model")
+                clear = c2.form_submit_button("Back to built-in")
+            if save and m.strip():
+                st.session_state.byo_llm = {"model": m.strip(), "api_key": k.strip(), "api_base": b.strip()}
+                st.rerun()
+            if clear:
+                st.session_state.pop("byo_llm", None)
+                st.rerun()
+            st.caption("Your key is kept in this browser session only and is never written to disk. "
+                       "Your own model's usage is not counted against the built-in allowance.")
 
     st.divider()
 
@@ -201,14 +251,19 @@ def render():
             st.markdown(query)
 
         with st.chat_message("assistant"):
-            spinner_msg = "Calling HuggingFace API..." if (agent_ready and token_ok) else "Thinking..."
-            with st.spinner(spinner_msg):
+            with st.spinner("Thinking..."):
                 if agent_ready:
-                    result = _run_agent(query)
+                    result = _run_agent(query, llm_override=byo)
                 else:
                     result = _demo_response(query)
 
             st.markdown(result["response"])
+            if result.get("byo_required"):
+                st.warning(
+                    "Open **🔢 Token allowance & provider** above and enter your own model, "
+                    "API key and (optional) API base URL, then ask again.",
+                    icon="🔑",
+                )
             intent = result.get("intent", "")
             if intent:
                 st.caption(f"Routed to: **{intent.replace('_', ' ').title()}**")
@@ -230,5 +285,3 @@ def render():
             st.rerun()
 
 
-# Constant used in the expander when model_info hasn't been called yet
-HF_MODEL_INFO_DEFAULT = "mistralai/Mixtral-8x7B-Instruct-v0.1"
