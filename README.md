@@ -136,7 +136,7 @@ Six tabs covering:
 | ML Platform | MLflow |
 | Embeddings | HuggingFace (all-MiniLM-L6-v2) |
 | AI Agent Framework | LangGraph |
-| LLM | Flan-T5-Base (local, via HuggingFace) |
+| LLM | LiteLLM routing: HuggingFace Inference + OpenAI, with a token budget |
 | Dashboard | Streamlit |
 | Container Platform | Podman |
 
@@ -199,6 +199,25 @@ http://localhost:8501
 
 ---
 
+## LLM Token Budget
+
+Agent calls go through LiteLLM ([`agents/llm_wrapper.py`](agents/llm_wrapper.py)), governed by [`agents/litellm_config.yaml`](agents/litellm_config.yaml).
+
+| Provider | Per stint | Total cap |
+|---|---|---|
+| HuggingFace | 20,000 tokens | 100,000 |
+| OpenAI | 10,000 tokens | 50,000 |
+
+- Rotation: HuggingFace (20k) → OpenAI (10k) → HuggingFace (20k) → … until each cap is reached.
+- If a provider hits a quota, rate-limit or auth error it is put in cooldown (600s) and the call fails over to the other provider.
+- Once both caps are reached the dashboard prompts the user to bring their own model/provider (session-only key, not counted against the budget).
+- Dev override: set `LLM_FORCE_PROVIDER=openai` (or `huggingface`), or use the provider-mode radio in the Agent Chat tab. The OpenAI 50k cap still applies.
+- Budget state is persisted to `LLM_BUDGET_STATE` (gitignored).
+
+Environment variables (in `.env`): `HF_API_TOKEN`, `HF_MODEL_LLM` (must be a chat model on `router.huggingface.co`, e.g. `meta-llama/Llama-3.1-8B-Instruct`), `OPENAI_API_KEY`, `OPENAI_MODEL`.
+
+---
+
 ## Project Structure
 
 ```
@@ -224,7 +243,9 @@ data-streaming/
 │   ├── supervisor.py           # Intent classification and routing
 │   ├── fraud_agent.py          # ML inference + Qdrant similarity
 │   ├── qa_agent.py             # RAG-powered tax Q&A
-│   ├── llm_wrapper.py          # HuggingFace LLM abstraction
+│   ├── llm_wrapper.py          # LiteLLM wrapper (budget, failover, BYO model)
+│   ├── token_budget.py         # Token budget: rotation, caps, cooldown
+│   ├── litellm_config.yaml     # Models and token-budget config
 │   ├── qdrant_search.py        # Vector search helpers
 │   ├── embeddings.py           # Embedding utilities
 │   ├── embed_regulatory_kb.py  # Seeds regulatory_kb collection
