@@ -338,7 +338,14 @@ services:
       # HuggingFace Inference API — free hosted LLM (no local GPU needed)
       # Get your free token at https://huggingface.co/settings/tokens
       HF_API_TOKEN: ${HF_API_TOKEN:-}
-      HF_MODEL_LLM: ${HF_MODEL_LLM:-mistralai/Mixtral-8x7B-Instruct-v0.1}
+      HF_MODEL_LLM: ${HF_MODEL_LLM:-meta-llama/Llama-3.1-8B-Instruct}
+      # OpenAI + LiteLLM token budget (agents/litellm_config.yaml)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.1}
+      # Dev switch: "openai" | "huggingface" sends every call to one provider
+      # (its total cap still applies). Leave empty to rotate.
+      LLM_FORCE_PROVIDER: ${LLM_FORCE_PROVIDER:-}
+      LLM_BUDGET_STATE: /agents/.llm_budget_state.json
       # Control Center backend config
       FLINK_API_URL: http://flink-jobmanager:8081
       PODMAN_SOCK: /run/podman.sock

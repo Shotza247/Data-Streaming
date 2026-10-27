@@ -1,4 +1,6 @@
-streamlit>=1.35.0
+# Pinned: an unpinned upgrade makes already-open browser tabs fail with
+# "Failed to process a Websocket message (RangeError ...)" (frontend/backend mismatch).
+streamlit==1.66.1
 # streamlit-autorefresh is optional — app works without it (falls back gracefully)
 # Uncomment below to enable 30-second auto-refresh on the Tax KPIs tab:
 # streamlit-autorefresh>=1.0.1
@@ -10,3 +12,10 @@ requests>=2.31.0
 pandas>=2.2.0
 plotly>=5.20.0
 python-dotenv>=1.0.1
+# LLM routing + token budget (agents/llm_wrapper.py, agents/token_budget.py)
+litellm>=1.50.0
+pyyaml>=6.0
+# Agent graph + vector search used by the Agent Chat tab
+langgraph==0.1.5
+langchain-core==0.2.5
+qdrant-client>=1.9.0

@@ -6,6 +6,12 @@
 # Set HF_API_TOKEN in your .env file to get a free token:
 #   https://huggingface.co/settings/tokens
 
+# ── LLM routing + token budget ────────────────────────────────────────────────
+# HuggingFace (20k stints, 100k total) <-> OpenAI (10k stints, 50k total).
+# Config: agents/litellm_config.yaml   Policy: agents/token_budget.py
+litellm>=1.50.0
+pyyaml>=6.0
+
 # ── API / HTTP ────────────────────────────────────────────────────────────────
 requests==2.32.3
 
