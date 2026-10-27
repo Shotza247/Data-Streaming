@@ -21,6 +21,7 @@ Backend strategy — dual-mode container management:
 
 import os
 import subprocess
+import sys
 import time
 import json
 import requests
@@ -549,7 +550,17 @@ def _render_pipeline_actions():
     st.subheader("🔧 One-Click Pipeline Actions", divider="green")
     st.caption("Run these to seed data, train models, or validate the full platform end-to-end.")
 
-    PROJECT_ROOT = Path(__file__).parent.parent.parent
+    # ── Resolve script / module roots ─────────────────────────────────────────
+    # Inside the container the volume mounts are:
+    #   ./scripts  → /scripts          ./mlflow → /mlflow_scripts
+    # On the host (local dev) the project root is 3 levels above this file.
+    _host_root     = Path(__file__).parent.parent.parent
+    _scripts_dir   = Path("/scripts")   if Path("/scripts").is_dir()       else _host_root / "scripts"
+    _mlflow_dir    = Path("/mlflow_scripts") if Path("/mlflow_scripts").is_dir() else _host_root / "mlflow"
+    # PYTHONPATH must include the project root so `from lineage.xxx` etc. work.
+    # Inside the container the storage/agents/lineage modules live at /, on the
+    # host they live under _host_root.
+    _pythonpath    = "/" if Path("/lineage").is_dir() else str(_host_root)
 
     a1, a2, a3, a4 = st.columns(4)
 
@@ -557,37 +568,47 @@ def _render_pipeline_actions():
         st.markdown("**🌱 Seed Qdrant**")
         st.caption("Embed SA tax law KB + cleaned tax records into Qdrant vector store")
         if st.button("Run: seed_qdrant.py", key="seed_qdrant"):
-            _run_script(PROJECT_ROOT, ["python", "scripts/seed_qdrant.py", "--kb-only"])
+            _run_script(_scripts_dir, [sys.executable, "seed_qdrant.py", "--kb-only"],
+                        pythonpath=_pythonpath)
 
     with a2:
         st.markdown("**🤖 Train MLflow Model**")
         st.caption("Train RandomForest fraud detector on cleaned-tax MinIO data")
         if st.button("Run: train_fraud_model.py", key="train_mlflow"):
-            _run_script(PROJECT_ROOT, ["python", "mlflow/train_fraud_model.py"])
+            _run_script(_mlflow_dir, [sys.executable, "train_fraud_model.py"],
+                        pythonpath=_pythonpath)
 
     with a3:
         st.markdown("**🧪 Smoke Test**")
         st.caption("Run 8-component integration test across all services")
         if st.button("Run: smoke_test.py", key="smoke_test"):
-            _run_script(PROJECT_ROOT, ["python", "scripts/smoke_test.py"])
+            _run_script(_scripts_dir, [sys.executable, "smoke_test.py"],
+                        pythonpath=_pythonpath)
 
     with a4:
         st.markdown("**📬 Submit Lineage**")
         st.caption("Emit OpenLineage events to Marquez for all 6 Flink jobs")
         if st.button("Run: submit_flink_jobs.py (lineage)", key="submit_lineage"):
-            _run_script(PROJECT_ROOT, ["python", "scripts/submit_flink_jobs.py"])
+            _run_script(_scripts_dir, [sys.executable, "submit_flink_jobs.py"],
+                        pythonpath=_pythonpath)
 
 
-def _run_script(cwd: Path, cmd: list):
-    """Run a Python script and show output inline."""
-    with st.spinner(f"Running `{' '.join(cmd)}`…"):
+def _run_script(cwd: Path, cmd: list, pythonpath: str = ""):
+    """Run a Python script in *cwd* and show output inline."""
+    display_cmd = " ".join(str(c) for c in cmd)
+    with st.spinner(f"Running `{display_cmd}`…"):
         try:
+            env = {**os.environ}
+            if pythonpath:
+                # Prepend to any existing PYTHONPATH so project modules are found
+                existing = env.get("PYTHONPATH", "")
+                env["PYTHONPATH"] = f"{pythonpath}:{existing}" if existing else pythonpath
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 cwd=str(cwd),
                 timeout=180,
-                env={**os.environ, "PYTHONPATH": str(cwd)},
+                env=env,
             )
             output = result.stdout.decode("utf-8", errors="replace")
             errors = result.stderr.decode("utf-8", errors="replace")
