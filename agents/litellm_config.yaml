@@ -1,0 +1,48 @@
+# agents/litellm_config.yaml
+# ---------------------------------------------------------------------------
+# LLM routing + token budget for the agents (read by agents/token_budget.py
+# and agents/llm_wrapper.py, which call LiteLLM).
+#
+# Values written as  os.environ/NAME  are read from the environment (.env).
+#
+# Rotation (the "loop"):
+#   HuggingFace  20,000 tokens  ->  OpenAI  10,000 tokens  ->  HuggingFace ...
+#   repeated until each provider reaches its total cap:
+#       HuggingFace  100,000 tokens  (5 stints of 20,000)
+#       OpenAI        50,000 tokens  (5 stints of 10,000)
+#   After that the user is prompted to supply their own model/provider.
+#
+# Provider order below is the rotation order.
+# Counted tokens = prompt + completion, as reported by the provider.
+# ---------------------------------------------------------------------------
+
+model_list:
+  - model_name: huggingface-primary
+    litellm_params:
+      model: os.environ/HF_MODEL_LLM          # must be a chat model on router.huggingface.co, e.g. meta-llama/Llama-3.1-8B-Instruct
+      custom_llm_provider: huggingface
+      api_key: os.environ/HF_API_TOKEN
+      temperature: 0.3
+
+  - model_name: openai-primary
+    litellm_params:
+      model: os.environ/OPENAI_MODEL          # e.g. gpt-5.1
+      custom_llm_provider: openai
+      api_key: os.environ/OPENAI_API_KEY
+      reasoning_effort: low                   # keep reasoning tokens (billed) small
+
+token_budget:
+  # After a quota / rate-limit / auth error a provider is skipped for this long
+  # and the call fails over to the other provider.
+  cooldown_seconds: 600
+
+  providers:
+    - name: huggingface
+      model_name: huggingface-primary
+      stint_tokens: 20000
+      total_tokens: 100000
+
+    - name: openai
+      model_name: openai-primary
+      stint_tokens: 10000
+      total_tokens: 50000

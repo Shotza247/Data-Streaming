@@ -37,3 +37,7 @@ Thumbs.db
 
 # Podman/Docker
 *.pid
+
+# LLM token-budget usage (local runtime state, agents/token_budget.py)
+.llm_budget_state.json
+.llm_budget_state.tmp
