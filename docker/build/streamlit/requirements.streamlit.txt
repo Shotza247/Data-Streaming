@@ -19,3 +19,5 @@ pyyaml>=6.0
 langgraph==0.1.5
 langchain-core==0.2.5
 qdrant-client>=1.9.0
+# Embeddings for RAG + similar-case search (ONNX, no PyTorch)
+fastembed>=0.3.0

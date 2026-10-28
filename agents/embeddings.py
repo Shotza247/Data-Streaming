@@ -1,8 +1,11 @@
 """
 agents/embeddings.py
 --------------------
-Shared embedding utility wrapping the HuggingFace sentence-transformers model.
-Model: sentence-transformers/all-MiniLM-L6-v2  (~80 MB, 384-dim, CPU-only)
+Shared embedding utility for all-MiniLM-L6-v2 (384-dim, CPU-only).
+
+Backend: fastembed (ONNX runtime, no PyTorch, ~100 MB) is preferred; falls back
+to sentence-transformers if fastembed is not installed. Both produce the same
+model's L2-normalised vectors, so collections are interchangeable.
 
 Exposes:
     get_model()                         -> SentenceTransformer (cached singleton)
@@ -37,32 +40,44 @@ _model = None
 
 def get_model():
     """
-    Load and cache the sentence-transformer model.
-    Thread-safe for single-process usage (Streamlit, scripts).
+    Load and cache the embedding model (fastembed, else sentence-transformers).
+    Returns a (backend_name, model) tuple.
     """
     global _model
     if _model is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError as exc:
-            raise ImportError(
-                "sentence-transformers not installed: "
-                "pip install sentence-transformers"
-            ) from exc
-
         log.info(f"Loading embedding model: {HF_MODEL_EMBED}")
-        _model = SentenceTransformer(HF_MODEL_EMBED)
-        log.info(f"Model loaded. Output dim: {_model.get_sentence_embedding_dimension()}")
+        try:
+            from fastembed import TextEmbedding
+            _model = ("fastembed", TextEmbedding(model_name=HF_MODEL_EMBED))
+        except ImportError:
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError as exc:
+                raise ImportError(
+                    "No embedding backend installed: pip install fastembed "
+                    "(or sentence-transformers)"
+                ) from exc
+            _model = ("sentence-transformers", SentenceTransformer(HF_MODEL_EMBED))
+        log.info(f"Embedding backend ready: {_model[0]}")
     return _model
+
+
+def _encode(texts: list[str], batch_size: int = 64, show_progress: bool = False) -> list[list[float]]:
+    backend, model = get_model()
+    if backend == "fastembed":
+        return [v.tolist() for v in model.embed(texts, batch_size=batch_size)]
+    vectors = model.encode(
+        texts, batch_size=batch_size, normalize_embeddings=True,
+        show_progress_bar=show_progress,
+    )
+    return [v.tolist() for v in vectors]
 
 
 def embed_text(text: str) -> list[float]:
     """
     Embed a single string. Returns a list of 384 floats.
     """
-    model = get_model()
-    vector = model.encode(str(text), normalize_embeddings=True)
-    return vector.tolist()
+    return _encode([str(text)])[0]
 
 
 def embed_batch(
@@ -74,14 +89,7 @@ def embed_batch(
     Embed a list of strings. Returns a list of 384-dim float lists.
     Uses batched encoding for efficiency.
     """
-    model = get_model()
-    vectors = model.encode(
-        [str(t) for t in texts],
-        batch_size=batch_size,
-        normalize_embeddings=True,
-        show_progress_bar=show_progress,
-    )
-    return [v.tolist() for v in vectors]
+    return _encode([str(t) for t in texts], batch_size=batch_size, show_progress=show_progress)
 
 
 def build_tax_record_text(record: dict) -> str:

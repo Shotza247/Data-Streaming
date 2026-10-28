@@ -73,13 +73,12 @@ def search_similar_fraud(record_dict: dict, top_k: int = 5) -> list:
         query_vec  = embed_text(query_text)
 
         client  = get_qdrant_client()
-        results = client.search(
+        return client.query_points(
             collection_name=COLLECTION_FRAUD,
-            query_vector=query_vec,
+            query=query_vec,
             limit=top_k,
             with_payload=True,
-        )
-        return results
+        ).points
     except Exception as exc:
         log.warning(f"search_similar_fraud failed: {exc}")
         return []
@@ -102,13 +101,12 @@ def search_regulatory_kb(query_str: str, top_k: int = 3) -> list:
         query_vec = embed_text(query_str)
 
         client  = get_qdrant_client()
-        results = client.search(
+        return client.query_points(
             collection_name=COLLECTION_KB,
-            query_vector=query_vec,
+            query=query_vec,
             limit=top_k,
             with_payload=True,
-        )
-        return results
+        ).points
     except Exception as exc:
         log.warning(f"search_regulatory_kb failed: {exc}")
         return []
