@@ -298,6 +298,59 @@ services:
       - streaming-net
 
   # ─────────────────────────────────────────────────────────────────────────
+  # ML trainer (one-shot). Waits for MLflow + real cleaned data in MinIO, then
+  # trains and registers 'fraud-detector'. Starts with `make up`; re-run any
+  # time from the dashboard (MLflow tab / Control Center) or:
+  #   podman start -a ml-trainer
+  # ─────────────────────────────────────────────────────────────────────────
+  ml-trainer:
+    build:
+      context: ./docker/build/ml-trainer
+    container_name: ml-trainer
+    restart: "no"
+    depends_on:
+      - mlflow
+      - minio
+    volumes:
+      - ./mlflow:/mlflow_scripts
+      - ./storage:/storage
+      - ./lineage:/lineage
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MARQUEZ_API_URL: ${MARQUEZ_API_URL}
+    networks:
+      - streaming-net
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Model API: serves fraud-detector predictions over HTTP so the dashboard and
+  # agents don't need mlflow/scikit-learn (protobuf conflicts with Streamlit).
+  # Reuses the ml-trainer image; reloads automatically when a new version is
+  # registered. Starts before any model exists and picks it up once trained.
+  # ─────────────────────────────────────────────────────────────────────────
+  model-api:
+    image: localhost/datastreaming_ml-trainer:latest
+    container_name: model-api
+    restart: unless-stopped
+    depends_on:
+      - ml-trainer
+    command: ["python", "serve_model.py"]
+    volumes:
+      - ./mlflow:/mlflow_scripts
+      - ./storage:/storage
+      - ./lineage:/lineage
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MODEL_API_PORT: "8000"
+    networks:
+      - streaming-net
+
+  # ─────────────────────────────────────────────────────────────────────────
   # Streamlit (dashboard — custom Python image built inline)
   # Control Center tab calls the Podman REST API via the mounted socket
   # to start/stop/restart containers without needing podman CLI inside image.
@@ -333,7 +386,10 @@ services:
       MINIO_ENDPOINT: ${MINIO_ENDPOINT}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+      # In-network URL: the container listens on 5000 (5001 is only the host mapping)
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      # Fraud-detector inference service (mlflow/serve_model.py)
+      MODEL_API_URL: http://model-api:8000
       MARQUEZ_API_URL: ${MARQUEZ_API_URL}
       # HuggingFace Inference API — free hosted LLM (no local GPU needed)
       # Get your free token at https://huggingface.co/settings/tokens
