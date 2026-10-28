@@ -390,6 +390,9 @@ services:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       # Fraud-detector inference service (mlflow/serve_model.py)
       MODEL_API_URL: http://model-api:8000
+      # Qdrant vector store (similar-case search + regulatory knowledge base)
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
       MARQUEZ_API_URL: ${MARQUEZ_API_URL}
       # HuggingFace Inference API — free hosted LLM (no local GPU needed)
       # Get your free token at https://huggingface.co/settings/tokens
