@@ -51,6 +51,11 @@ CLEANED_GLOB = f"s3://{BUCKET_CLEANED}/dt=*/part-*"
 # ephemeral ports, so queries read only the newest N dt= partitions.
 RECENT_PARTITIONS = int(os.getenv("CLEANED_RECENT_PARTITIONS", "7"))
 
+# Flink writes newline-delimited JSON. Declaring the format avoids per-file
+# schema merging: union_by_name over hundreds of tiny files runs DuckDB 2.x out
+# of memory (12 GiB) even though the data is under 1 MB.
+_JSON_OPTS = "format='newline_delimited'"
+
 
 def _cleaned_source() -> str:
     """
@@ -76,10 +81,10 @@ def _cleaned_source() -> str:
         newest = sorted(prefixes)[-RECENT_PARTITIONS:]
         if newest:
             globs = [f"s3://{BUCKET_CLEANED}/{p}part-*" for p in newest]
-            return f"read_json_auto({globs!r}, union_by_name=true)"
+            return f"read_json_auto({globs!r}, {_JSON_OPTS})"
     except Exception as exc:
         log.warning(f"Partition listing failed, falling back to full glob: {exc}")
-    return f"read_json_auto('{CLEANED_GLOB}', union_by_name=true)"
+    return f"read_json_auto('{CLEANED_GLOB}', {_JSON_OPTS})"
 
 
 
@@ -149,15 +154,15 @@ def get_tax_kpi_trend(n_windows: int = 24):
     sql = f"""
         SELECT
             DATE_TRUNC('minute',
-                CAST(processed_at AS TIMESTAMPTZ)
-                - (EXTRACT(MINUTE FROM CAST(processed_at AS TIMESTAMPTZ))::INT % 5) * INTERVAL '1 minute'
+                CAST(flink_processed_at AS TIMESTAMPTZ)
+                - (EXTRACT(MINUTE FROM CAST(flink_processed_at AS TIMESTAMPTZ))::INT % 5) * INTERVAL '1 minute'
             )                          AS window_start,
             COUNT(*)                   AS total_count,
             AVG(taxable_income)        AS avg_income,
             SUM(CASE WHEN is_fraud = TRUE THEN 1 ELSE 0 END) AS fraud_count,
             AVG(CASE WHEN is_fraud = TRUE THEN 1.0 ELSE 0.0 END) AS fraud_rate
         FROM {_cleaned_source()}
-        WHERE processed_at IS NOT NULL
+        WHERE flink_processed_at IS NOT NULL
         GROUP BY 1
         ORDER BY 1 DESC
         LIMIT {n_windows}

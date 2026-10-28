@@ -34,6 +34,9 @@ log = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 MINIO_ENDPOINT   = os.getenv("MINIO_ENDPOINT",   "http://localhost:9000")
+# compose passes "host:port" with no scheme; boto3 requires one
+if "://" not in MINIO_ENDPOINT:
+    MINIO_ENDPOINT = f"http://{MINIO_ENDPOINT}"
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
 
