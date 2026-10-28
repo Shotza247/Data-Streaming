@@ -29,7 +29,10 @@ model_list:
       model: os.environ/OPENAI_MODEL          # e.g. gpt-5.1
       custom_llm_provider: openai
       api_key: os.environ/OPENAI_API_KEY
-      reasoning_effort: low                   # keep reasoning tokens (billed) small
+      # gpt-5.x spends max_tokens on hidden reasoning and can return an EMPTY answer.
+      # "none" disables it: full answers, 0 reasoning tokens billed. Unsupported
+      # values are dropped automatically for models that lack this parameter.
+      reasoning_effort: none
 
 token_budget:
   # After a quota / rate-limit / auth error a provider is skipped for this long
