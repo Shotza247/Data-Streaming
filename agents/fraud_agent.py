@@ -4,8 +4,8 @@ agents/fraud_agent.py
 LangGraph Fraud Detection Agent node.
 
 Capabilities:
-  1. Loads the 'fraud-detector' model from the MLflow Model Registry
-  2. Runs ML inference on the application record → fraud_probability
+  1. Scores the application with the 'fraud-detector' model via the model-api
+     service (mlflow/serve_model.py) -> fraud_probability
   3. Searches Qdrant fraud_similarity collection for top-5 similar known cases
   4. Assembles a structured JSON response
 
@@ -15,44 +15,37 @@ State writes: state["response"]   (str — formatted JSON summary)
 """
 
 import logging
-from typing import Any
+import os
+from typing import Any, Optional
+
+import requests
 
 log = logging.getLogger(__name__)
 
-# ── MLflow model loader (cached per process) ──────────────────────────────────
-_fraud_model = None
+MODEL_API_URL = os.getenv("MODEL_API_URL", "http://model-api:8000")
 
-def _get_fraud_model():
-    global _fraud_model
-    if _fraud_model is None:
-        try:
-            import mlflow
-            import sys
-            from pathlib import Path
-            sys.path.insert(0, str(Path(__file__).parent.parent))
-            from mlflow.mlflow_config import setup_mlflow, MODEL_NAME, PRODUCTION_STAGE
 
-            setup_mlflow()
-            client = mlflow.tracking.MlflowClient()
-
-            # Try Production stage first, fall back to Staging
-            for stage in [PRODUCTION_STAGE, "Staging", "None"]:
-                versions = [
-                    v for v in client.search_model_versions(f"name='{MODEL_NAME}'")
-                    if v.current_stage == stage
-                ]
-                if versions:
-                    latest = max(versions, key=lambda v: int(v.version))
-                    uri = f"models:/{MODEL_NAME}/{stage}"
-                    log.info(f"Loading MLflow model: {uri}")
-                    _fraud_model = mlflow.sklearn.load_model(uri)
-                    break
-
-            if _fraud_model is None:
-                log.warning("No registered fraud-detector model found in MLflow.")
-        except Exception as exc:
-            log.warning(f"MLflow model load failed: {exc}")
-    return _fraud_model
+def _score_application(app_dict: dict) -> tuple[Optional[float], str]:
+    """
+    Ask the model-api service for a fraud probability.
+    Returns (probability or None, reason). The reason explains a None result.
+    """
+    record = {
+        "province":          str(app_dict.get("province", "UNKNOWN")),
+        "taxable_income":    float(app_dict.get("taxable_income", 0.0) or 0.0),
+        "employment_type":   str(app_dict.get("employment_type", "UNKNOWN")),
+        "employment_status": str(app_dict.get("employment_status", "UNKNOWN")),
+        "filing_status":     str(app_dict.get("filing_status", "UNKNOWN")),
+    }
+    try:
+        r = requests.post(f"{MODEL_API_URL}/predict", json={"records": [record]}, timeout=10)
+    except requests.RequestException as exc:
+        return None, f"model-api unreachable ({type(exc).__name__})"
+    if r.status_code == 503:
+        return None, "no trained model yet"
+    if r.status_code != 200:
+        return None, f"model-api error {r.status_code}: {r.text[:120]}"
+    return r.json()["fraud_probability"][0], ""
 
 
 def fraud_agent_node(state: dict) -> dict:
@@ -68,23 +61,8 @@ def fraud_agent_node(state: dict) -> dict:
 
     app_dict = state.get("application_dict") or {}
 
-    # ── Attempt ML inference ───────────────────────────────────────────────────
-    fraud_probability = None
-    model = _get_fraud_model()
-
-    if model is not None:
-        try:
-            features = pd.DataFrame([{
-                "province":          str(app_dict.get("province", "UNKNOWN")),
-                "taxable_income":    float(app_dict.get("taxable_income", 0.0)),
-                "employment_type":   str(app_dict.get("employment_type", "UNKNOWN")),
-                "employment_status": str(app_dict.get("employment_status", "UNKNOWN")),
-                "filing_status":     str(app_dict.get("filing_status", "UNKNOWN")),
-            }])
-            proba = model.predict_proba(features)
-            fraud_probability = round(float(proba[0][1]), 4)
-        except Exception as exc:
-            log.warning(f"Model inference failed: {exc}")
+    # ── ML inference (model-api service) ───────────────────────────────────────
+    fraud_probability, unavailable_reason = _score_application(app_dict)
 
     # ── Qdrant similarity search ───────────────────────────────────────────────
     similar_cases = []
@@ -117,7 +95,7 @@ def fraud_agent_node(state: dict) -> dict:
     elif high_similarity_fraud >= 3:
         recommendation = "ELEVATED RISK — Highly similar to known fraud cases in the database."
     else:
-        recommendation = "ASSESSMENT UNAVAILABLE — MLflow model not loaded. Check MLflow service."
+        recommendation = f"ASSESSMENT UNAVAILABLE — {unavailable_reason}. Train the model from the MLflow tab."
 
     # ── Assemble response ──────────────────────────────────────────────────────
     response_data = {
@@ -125,7 +103,7 @@ def fraud_agent_node(state: dict) -> dict:
         "fraud_probability": fraud_probability,
         "recommendation":    recommendation,
         "similar_cases":     similar_cases[:3],   # top-3 for display
-        "model_available":   model is not None,
+        "model_available":   fraud_probability is not None,
     }
 
     state["response"] = json.dumps(response_data, indent=2)
