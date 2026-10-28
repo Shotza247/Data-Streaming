@@ -304,6 +304,7 @@ data-streaming/
 | Qdrant | http://localhost:6333 |
 | Marquez UI | http://localhost:3000 |
 | MLflow | http://localhost:5001 |
+| Model API (in-network) | http://model-api:8000 (`/health`, `/predict`, `/reload`, `/train`, `/train/status`) |
 
 ---
 

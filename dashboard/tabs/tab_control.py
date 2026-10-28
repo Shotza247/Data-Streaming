@@ -573,14 +573,23 @@ def _render_pipeline_actions():
 
     with a2:
         st.markdown("**🤖 Train MLflow Model**")
-        st.caption("Starts the ml-trainer container: trains on real cleaned-tax data and registers the model")
-        trainer_state = _container_state("ml-trainer")
-        if trainer_state == "missing":
-            st.warning("ml-trainer not created: `podman compose up -d ml-trainer`")
-        elif st.button("Start ml-trainer", key="train_mlflow", disabled=trainer_state == "running"):
-            ok, msg = _container_action("ml-trainer", "start")
-            (st.success if ok else st.error)(msg)
-        st.caption(f"Status: {trainer_state}  ·  logs and results in the MLflow tab")
+        st.caption("Trains the fraud detector via model-api; logs and results in the MLflow tab")
+        model_api = os.getenv("MODEL_API_URL", "http://model-api:8000")
+        try:
+            t_state = requests.get(f"{model_api}/train/status", timeout=3).json()["state"]
+        except Exception:
+            t_state = "unreachable"
+        s1, s2 = st.columns(2)
+        for col, label, source, key in ((s1, "Sample", "sample", "train_sample_cc"),
+                                        (s2, "Streamed", "streamed", "train_streamed_cc")):
+            with col:
+                if st.button(label, key=key, disabled=t_state in ("running", "unreachable")):
+                    try:
+                        r = requests.post(f"{model_api}/train", json={"source": source}, timeout=5)
+                        (st.success if r.status_code == 202 else st.error)(r.json().get("message", "?"))
+                    except Exception as exc:
+                        st.error(f"model-api unreachable: {exc}")
+        st.caption(f"Trainer: {t_state}")
 
     with a3:
         st.markdown("**🧪 Smoke Test**")
