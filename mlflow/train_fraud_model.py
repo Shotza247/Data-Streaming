@@ -72,7 +72,8 @@ def _load_training_data(get_df, n_rows: int, min_rows: int, wait_seconds: int):
 
 
 def main(n_rows: int = 20000, run_name: str = "rf_baseline",
-         allow_synthetic: bool = False, wait_seconds: int = 0):
+         allow_synthetic: bool = False, wait_seconds: int = 0,
+         sample_data: bool = False):
     # ── Lazy imports ───────────────────────────────────────────────────────────
     try:
         import mlflow
@@ -107,20 +108,27 @@ def main(n_rows: int = 20000, run_name: str = "rf_baseline",
     log.info("MLflow experiment ready.")
 
     # ── Load data ──────────────────────────────────────────────────────────────
-    log.info(f"Loading up to {n_rows} cleaned records from MinIO/DuckDB...")
-    df = _load_training_data(get_cleaned_data_for_ml, n_rows, MIN_TRAIN_ROWS, wait_seconds)
+    data_source = "streamed"
+    if sample_data:
+        data_source = "sample"
+        log.info("Using generated SAMPLE data (--sample-data); MinIO is not read.")
+        df = _generate_synthetic_data(n_rows=min(max(n_rows, 500), 5000))
+    else:
+        log.info(f"Loading up to {n_rows} cleaned records from MinIO/DuckDB...")
+        df = _load_training_data(get_cleaned_data_for_ml, n_rows, MIN_TRAIN_ROWS, wait_seconds)
 
-    if df.empty or len(df) < MIN_TRAIN_ROWS:
-        msg = (
-            f"Not enough training data ({len(df)} rows, minimum={MIN_TRAIN_ROWS}). "
-            "Ensure the producers and Flink job_05 have written cleaned records to MinIO."
-        )
-        if not allow_synthetic:
-            log.error(msg)
-            sys.exit(2)
-        log.warning(msg)
-        log.info("Generating synthetic demo data (--allow-synthetic)...")
-        df = _generate_synthetic_data(n_rows=500)
+        if df.empty or len(df) < MIN_TRAIN_ROWS:
+            msg = (
+                f"Not enough training data ({len(df)} rows, minimum={MIN_TRAIN_ROWS}). "
+                "Ensure the producers and Flink job_05 have written cleaned records to MinIO."
+            )
+            if not allow_synthetic:
+                log.error(msg)
+                sys.exit(2)
+            log.warning(msg)
+            log.info("Generating synthetic demo data (--allow-synthetic)...")
+            data_source = "sample"
+            df = _generate_synthetic_data(n_rows=500)
 
     if df[TARGET_COLUMN].astype(int).nunique() < 2:
         log.error("Training data contains a single class; need both fraud and non-fraud rows.")
@@ -175,9 +183,10 @@ def main(n_rows: int = 20000, run_name: str = "rf_baseline",
     log.info(f"F1 Score : {f1:.4f}")
 
     # ── Log to MLflow ──────────────────────────────────────────────────────────
-    with mlflow.start_run(run_name=run_name) as run:
+    with mlflow.start_run(run_name=f"{run_name}_{data_source}") as run:
         run_id = run.info.run_id
         log.info(f"MLflow run_id: {run_id}")
+        mlflow.set_tag("data_source", data_source)   # "sample" or "streamed"
 
         # Parameters
         mlflow.log_params({
@@ -327,10 +336,13 @@ if __name__ == "__main__":
                         help="Train on synthetic data if real data is insufficient (demo only)")
     parser.add_argument("--wait", type=int, default=0, metavar="SECONDS",
                         help="Wait up to this long for MLflow and enough cleaned data")
+    parser.add_argument("--sample-data", action="store_true",
+                        help="Train on generated sample data without reading MinIO (for testing)")
     args = parser.parse_args()
 
     metrics = main(n_rows=args.n_rows, run_name=args.run_name,
-                   allow_synthetic=args.allow_synthetic, wait_seconds=args.wait)
+                   allow_synthetic=args.allow_synthetic, wait_seconds=args.wait,
+                   sample_data=args.sample_data)
     print("\nTraining complete:")
     for k, v in metrics.items():
         print(f"  {k}: {v}")

@@ -12,13 +12,18 @@ with), so the dashboard/agents never need mlflow or scikit-learn installed.
                                          employment_status, filing_status}, ...]}
                       reply {"fraud_probability": [0.12, ...], "version": "1", "stage": "Staging"}
     POST /reload   -> force-reload the newest Production/Staging model
+    POST /train    -> start training in the background (one at a time)
+                      body {"n_rows": 20000, "source": "streamed" | "sample"}
+    GET  /train/status -> {"state": idle|running|succeeded|failed, "log": [...], ...}
 
-The newest registered version is also picked up automatically every 30 seconds.
+The newest registered version is also picked up automatically every 30 seconds,
+and right after a training run succeeds.
 """
 
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -36,6 +41,49 @@ RELOAD_CHECK_SECONDS = 30
 
 _lock = threading.Lock()
 _state = {"model": None, "version": None, "stage": None}
+
+# ── Background training job ───────────────────────────────────────────────────
+MAX_LOG_LINES = 200
+_train_lock = threading.Lock()
+_train = {"state": "idle", "started_at": None, "finished_at": None, "exit_code": None, "log": []}
+
+
+def _run_training(cmd: list):
+    code = -1
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            cwd=str(Path(__file__).parent), env={**os.environ, "PYTHONPATH": "/"},
+        )
+        for line in proc.stdout:
+            with _train_lock:
+                _train["log"].append(line.rstrip())
+                del _train["log"][:-MAX_LOG_LINES]
+        code = proc.wait()
+    except Exception as exc:
+        with _train_lock:
+            _train["log"].append(f"Could not run trainer: {type(exc).__name__}: {exc}")
+    if code == 0:
+        load_model(force=True)          # serve the new model immediately
+    with _train_lock:
+        _train.update(state="succeeded" if code == 0 else "failed",
+                      exit_code=code, finished_at=time.time())
+    log.info(f"Training finished with exit code {code}")
+
+
+def start_training(n_rows: int, sample_data: bool) -> bool:
+    """Start a training run. Returns False if one is already running."""
+    with _train_lock:
+        if _train["state"] == "running":
+            return False
+        _train.update(state="running", started_at=time.time(), finished_at=None,
+                      exit_code=None, log=[])
+    cmd = [sys.executable, str(Path(__file__).parent / "train_fraud_model.py"),
+           "--n-rows", str(n_rows)]
+    if sample_data:
+        cmd.append("--sample-data")
+    threading.Thread(target=_run_training, args=(cmd,), daemon=True).start()
+    return True
 
 
 def _best_version():
@@ -110,6 +158,9 @@ class Handler(BaseHTTPRequestHandler):
                 "status": "ok" if loaded else "no_model",
                 "version": _state["version"], "stage": _state["stage"],
             })
+        elif self.path == "/train/status":
+            with _train_lock:
+                self._send(200, {**_train, "log": list(_train["log"])})
         else:
             self._send(404, {"error": "not found"})
 
@@ -119,6 +170,12 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
             return self._send(400, {"error": "invalid JSON"})
+
+        if self.path == "/train":
+            n_rows = int(body.get("n_rows") or 20000)
+            started = start_training(n_rows, body.get("source") == "sample")
+            return self._send(202 if started else 409,
+                              {"started": started, "message": "started" if started else "already running"})
 
         if self.path == "/reload":
             ok = load_model(force=True)
