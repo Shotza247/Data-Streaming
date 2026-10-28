@@ -55,7 +55,7 @@ SERVICES = {
     "Qdrant":          {"container": "qdrant",           "port": 6333,  "proto": "http", "path": "/healthz"},
     "Flink JM":        {"container": "flink-jobmanager", "port": 8081,  "proto": "http", "path": "/overview"},
     "Marquez":         {"container": "marquez",          "port": 5000,  "proto": "http", "path": "/api/v1/namespaces"},
-    "MLflow":          {"container": "mlflow",           "port": 5001,  "proto": "http", "path": "/api/2.0/mlflow/experiments/list"},
+    "MLflow":          {"container": "mlflow",           "port": 5001,  "proto": "http", "path": "/health"},
     "Kafka UI":        {"container": "kafka-ui",         "port": 8080,  "proto": "http", "path": "/"},
     "Streamlit":       {"container": "streamlit",        "port": 8501,  "proto": "http", "path": "/healthz"},
     "KPI Poller":      {"container": "kpi-poller",       "port": None,  "proto": "container"},
@@ -573,10 +573,14 @@ def _render_pipeline_actions():
 
     with a2:
         st.markdown("**🤖 Train MLflow Model**")
-        st.caption("Train RandomForest fraud detector on cleaned-tax MinIO data")
-        if st.button("Run: train_fraud_model.py", key="train_mlflow"):
-            _run_script(_mlflow_dir, [sys.executable, "train_fraud_model.py"],
-                        pythonpath=_pythonpath)
+        st.caption("Starts the ml-trainer container: trains on real cleaned-tax data and registers the model")
+        trainer_state = _container_state("ml-trainer")
+        if trainer_state == "missing":
+            st.warning("ml-trainer not created: `podman compose up -d ml-trainer`")
+        elif st.button("Start ml-trainer", key="train_mlflow", disabled=trainer_state == "running"):
+            ok, msg = _container_action("ml-trainer", "start")
+            (st.success if ok else st.error)(msg)
+        st.caption(f"Status: {trainer_state}  ·  logs and results in the MLflow tab")
 
     with a3:
         st.markdown("**🧪 Smoke Test**")
