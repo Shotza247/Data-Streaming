@@ -52,10 +52,12 @@ def setup_mlflow():
 
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
-    # boto3 / MLflow uses these env vars for S3-compatible artifact storage
+    # boto3 / MLflow uses these env vars for S3-compatible artifact storage.
+    # MINIO_ENDPOINT may be "host:port" (compose) — boto3 needs a scheme.
+    s3_endpoint = MINIO_ENDPOINT if "://" in MINIO_ENDPOINT else f"http://{MINIO_ENDPOINT}"
     _os.environ["AWS_ACCESS_KEY_ID"]     = MINIO_ACCESS_KEY
     _os.environ["AWS_SECRET_ACCESS_KEY"] = MINIO_SECRET_KEY
-    _os.environ["MLFLOW_S3_ENDPOINT_URL"] = MINIO_ENDPOINT
+    _os.environ["MLFLOW_S3_ENDPOINT_URL"] = s3_endpoint
 
     # Create or get the experiment
     experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)

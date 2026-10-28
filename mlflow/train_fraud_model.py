@@ -18,11 +18,18 @@ Steps:
 Usage:
     python mlflow/train_fraud_model.py
     python mlflow/train_fraud_model.py --n-rows 5000
+    python mlflow/train_fraud_model.py --wait 900        # wait for MLflow + data
+    python mlflow/train_fraud_model.py --allow-synthetic # demo data (offline only)
 
-Called by: make seed (after Qdrant seeding)
+By default only real cleaned data is used: if MinIO has fewer than
+MIN_TRAIN_ROWS rows the script exits with code 2 instead of training on
+synthetic data.
+
+Called by: the ml-trainer container, make train
 """
 
 import sys
+import time
 import argparse
 import logging
 from pathlib import Path
@@ -40,7 +47,32 @@ logging.basicConfig(
 log = logging.getLogger("train_fraud_model")
 
 
-def main(n_rows: int = 20000, run_name: str = "rf_baseline"):
+def _retry_until(fn, wait_seconds: int, what: str, interval: int = 15):
+    """Call fn() until it succeeds or wait_seconds has elapsed (then re-raise)."""
+    deadline = time.time() + wait_seconds
+    while True:
+        try:
+            return fn()
+        except Exception as exc:
+            if time.time() >= deadline:
+                raise
+            log.info(f"Waiting for {what} ({type(exc).__name__}); retrying in {interval}s...")
+            time.sleep(interval)
+
+
+def _load_training_data(get_df, n_rows: int, min_rows: int, wait_seconds: int):
+    """Load cleaned data, polling until min_rows is reached or wait_seconds elapses."""
+    deadline = time.time() + wait_seconds
+    while True:
+        df = get_df(n_rows=n_rows)
+        if len(df) >= min_rows or time.time() >= deadline:
+            return df
+        log.info(f"Only {len(df)}/{min_rows} cleaned rows so far; checking again in 30s...")
+        time.sleep(30)
+
+
+def main(n_rows: int = 20000, run_name: str = "rf_baseline",
+         allow_synthetic: bool = False, wait_seconds: int = 0):
     # ── Lazy imports ───────────────────────────────────────────────────────────
     try:
         import mlflow
@@ -71,21 +103,28 @@ def main(n_rows: int = 20000, run_name: str = "rf_baseline"):
     from storage.duckdb_queries import get_cleaned_data_for_ml
 
     # ── Setup MLflow ───────────────────────────────────────────────────────────
-    setup_mlflow()
-    log.info(f"MLflow experiment ready.")
+    _retry_until(setup_mlflow, wait_seconds, "MLflow tracking server")
+    log.info("MLflow experiment ready.")
 
     # ── Load data ──────────────────────────────────────────────────────────────
     log.info(f"Loading up to {n_rows} cleaned records from MinIO/DuckDB...")
-    df = get_cleaned_data_for_ml(n_rows=n_rows)
+    df = _load_training_data(get_cleaned_data_for_ml, n_rows, MIN_TRAIN_ROWS, wait_seconds)
 
     if df.empty or len(df) < MIN_TRAIN_ROWS:
-        log.warning(
+        msg = (
             f"Not enough training data ({len(df)} rows, minimum={MIN_TRAIN_ROWS}). "
-            "Ensure Flink job_05 has written cleaned records to MinIO."
+            "Ensure the producers and Flink job_05 have written cleaned records to MinIO."
         )
-        # Generate synthetic demo data so training can proceed
-        log.info("Generating synthetic demo data for training demonstration...")
+        if not allow_synthetic:
+            log.error(msg)
+            sys.exit(2)
+        log.warning(msg)
+        log.info("Generating synthetic demo data (--allow-synthetic)...")
         df = _generate_synthetic_data(n_rows=500)
+
+    if df[TARGET_COLUMN].astype(int).nunique() < 2:
+        log.error("Training data contains a single class; need both fraud and non-fraud rows.")
+        sys.exit(2)
 
     log.info(f"Training dataset: {len(df)} rows, fraud rate={df[TARGET_COLUMN].mean():.2%}")
 
@@ -284,9 +323,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train fraud detection model")
     parser.add_argument("--n-rows",   type=int, default=20000, help="Max training rows from MinIO")
     parser.add_argument("--run-name", type=str, default="rf_baseline", help="MLflow run name")
+    parser.add_argument("--allow-synthetic", action="store_true",
+                        help="Train on synthetic data if real data is insufficient (demo only)")
+    parser.add_argument("--wait", type=int, default=0, metavar="SECONDS",
+                        help="Wait up to this long for MLflow and enough cleaned data")
     args = parser.parse_args()
 
-    metrics = main(n_rows=args.n_rows, run_name=args.run_name)
+    metrics = main(n_rows=args.n_rows, run_name=args.run_name,
+                   allow_synthetic=args.allow_synthetic, wait_seconds=args.wait)
     print("\nTraining complete:")
     for k, v in metrics.items():
         print(f"  {k}: {v}")
