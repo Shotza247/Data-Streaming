@@ -174,12 +174,15 @@ podman machine start
 
 **3. Launch the platform**
 ```bash
-make up
+make start                         # or, without make: python scripts/launcher.py up
 ```
+The [launcher](#launcher) starts every service, waits for them to become healthy, creates the Kafka topics, and submits the Flink SQL jobs that are not already running. It is safe to re-run at any time.
 
-**4. Deploy Flink SQL jobs**
+> Manual alternative: `make up` then `make submit-sql`.
+
+**4. Start the data producers** (optional)
 ```bash
-make submit-sql
+python scripts/launcher.py up --producers
 ```
 
 **5. Seed the vector database**
@@ -196,6 +199,28 @@ make smoke-test
 ```
 http://localhost:8501
 ```
+
+---
+
+## Launcher
+
+[`scripts/launcher.py`](scripts/launcher.py) is the host-side entry point for starting and checking the platform. It runs natively on Windows, WSL and Linux, with Podman or Docker (`CONTAINER_CLI` overrides auto-detection), so the same command works locally and on a Docker host.
+
+```bash
+python scripts/launcher.py up [--producers] [--no-wait]   # start, wait healthy, submit missing Flink jobs
+python scripts/launcher.py down                           # stop all services
+python scripts/launcher.py status                         # service health + Flink job state
+python scripts/launcher.py jobs [filter]                  # submit only the Flink jobs that are not running
+```
+
+`make start`, `make stop` and `make status` are thin wrappers around the same commands.
+
+- **Idempotent:** Flink jobs are matched by sink table against the running jobs in the Flink REST API. Jobs already running are skipped, so re-running never creates duplicates. A job file that is only partially running is reported and left alone.
+- **Health-based waits:** `up` polls Kafka, Postgres, MinIO, Flink and Marquez instead of sleeping for a fixed time.
+- **After a restart:** Flink job state is not persisted across a JobManager restart. Run `make start` (or `python scripts/launcher.py jobs`) to bring the jobs back. On a server this can be scheduled with cron or a systemd timer.
+- **Not included:** Qdrant seeding and MLflow training are separate (`make seed`, `make train`).
+
+**Control Center and container control.** Start/Stop/Restart in the Control Center need either the Podman socket mounted into the Streamlit container or a container CLI inside it. The socket mount is unreliable on Windows/WSL. When neither is available, the Producer Controls are shown read-only with a pointer to the launcher; status, Flink job views and logs still work.
 
 ---
 
@@ -279,6 +304,7 @@ data-streaming/
 │       └── tab_lineage.py
 │
 ├── scripts/                    # Operational scripts
+│   ├── launcher.py             # Host-side start/stop/status + idempotent Flink job submit
 │   ├── seed_qdrant.py
 │   ├── submit_flink_jobs.py
 │   ├── kpi_to_redis.py
@@ -312,7 +338,10 @@ data-streaming/
 
 **Infrastructure**
 ```bash
-make up          # Start all services
+make start       # Launcher: start, wait healthy, submit missing Flink jobs
+make stop        # Launcher: stop all services
+make status      # Launcher: service health + Flink job state
+make up          # Start all services (no health wait, no job submit)
 make down        # Stop all services
 make restart     # Restart all services
 make logs        # Tail service logs

@@ -17,6 +17,12 @@
 
 ## Step 1 — Start the Platform
 
+> **Shortcut:** `make start` (or `python scripts/launcher.py up --producers`) performs
+> Steps 1–4 in one idempotent command: it starts the services, waits for them to be
+> healthy, creates the Kafka topics, and submits only the Flink jobs that are not
+> already running. The manual steps below show what it does. Check state at any time
+> with `make status`.
+
 ```bash
 # Clone the repository
 git clone https://github.com/Shotza247/Data-Streaming.git
@@ -269,6 +275,8 @@ Data Lineage: OpenLineage → Marquez (full DAG of all movements above)
 | Symptom | Fix |
 |---|---|
 | Flink jobs not starting | Check `make flink-logs` — ensure jobmanager + taskmanager both running |
+| Flink jobs gone after a restart | Job state is not persisted. Run `make start` (or `python scripts/launcher.py jobs`) to resubmit only the missing ones |
+| Control Center Start/Stop buttons disabled | The Podman socket mount is unavailable (common on Windows/WSL). Use `python scripts/launcher.py up --producers` from the host |
 | MinIO cleaned-tax empty | Wait 5+ minutes after `make submit-sql` for first window to commit |
 | Redis has no KPI keys | Check `make kpi-poller-logs` — table may be empty until first Flink window |
 | MLflow 502 error | `podman compose restart mlflow` — postgres backend may have started after MLflow |
