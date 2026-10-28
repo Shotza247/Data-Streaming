@@ -217,7 +217,7 @@ seed-kb:
 	python scripts/seed_qdrant.py --kb-only
 
 train:
-	python mlflow/train_fraud_model.py
+	podman start -a ml-trainer
 
 promote:
 	python mlflow/promote_model.py
