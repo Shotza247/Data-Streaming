@@ -230,6 +230,39 @@ def get_cleaned_data_for_ml(n_rows: int = 50000):
     )
 
 
+def get_recent_events(n_rows: int = 50):
+    """
+    Newest cleaned events (most recent first) for live model scoring.
+
+    Columns: application_id, customer_id, province, taxable_income,
+             employment_type, employment_status, filing_status, is_fraud,
+             flink_processed_at
+
+    Used by: dashboard MLflow tab "Live scoring".
+    """
+    sql = f"""
+        SELECT
+            application_id,
+            customer_id,
+            COALESCE(province, 'UNKNOWN')          AS province,
+            COALESCE(taxable_income, 0.0)           AS taxable_income,
+            COALESCE(employment_type, 'UNKNOWN')   AS employment_type,
+            COALESCE(employment_status, 'UNKNOWN') AS employment_status,
+            COALESCE(filing_status, 'UNKNOWN')     AS filing_status,
+            COALESCE(is_fraud, false)               AS is_fraud,
+            flink_processed_at
+        FROM {_cleaned_source()}
+        WHERE application_id IS NOT NULL
+        ORDER BY flink_processed_at DESC
+        LIMIT {int(n_rows)}
+    """
+    return _run_query(
+        sql,
+        ["application_id", "customer_id", "province", "taxable_income", "employment_type",
+         "employment_status", "filing_status", "is_fraud", "flink_processed_at"],
+    )
+
+
 def get_income_distribution(n_buckets: int = 20):
     """
     Return income bracket distribution for the dashboard histogram.
