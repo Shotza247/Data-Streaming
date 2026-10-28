@@ -100,7 +100,10 @@ def main():
     if not args.kb_only:
         try:
             n = seed_tax_records(args.limit)
-            results["fraud_similarity"] = f"OK ({n} records)"
+            results["fraud_similarity"] = (
+                f"OK ({n} records)" if n > 0
+                else "FAILED: 0 records embedded (no cleaned data, or the DuckDB query failed)"
+            )
         except Exception as exc:
             log.error(f"fraud_similarity seeding failed: {exc}")
             results["fraud_similarity"] = f"FAILED: {exc}"
