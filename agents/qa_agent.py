@@ -39,22 +39,34 @@ def qa_agent_node(state: dict) -> dict:
     sources      = []
 
     try:
-        from agents.qdrant_search import search_regulatory_kb, format_kb_context
-        results  = search_regulatory_kb(question, top_k=3)
+        from agents.qdrant_search import (
+            search_knowledge_base, search_regulatory_kb, format_kb_context,
+        )
+        # Curated knowledge base first; fall back to the older synthetic KB.
+        results = search_knowledge_base(question, top_k=4) or search_regulatory_kb(question, top_k=3)
         context_text = format_kb_context(results)
-        sources = [
-            f"{r.payload.get('source_doc', '?')} §{r.payload.get('section', '?')}"
-            for r in results if r.payload
-        ]
+        sources = []
+        for r in results:
+            p = r.payload or {}
+            if "file" in p:
+                label = f"{p['file']} - {p.get('section', '?')} [{p.get('status', 'n/a')}]"
+            else:
+                label = f"{p.get('source_doc', '?')} §{p.get('section', '?')}"
+            sources.append(label)
     except Exception as exc:
         log.warning(f"Qdrant KB search failed: {exc}")
         context_text = "No regulatory context available."
 
     # ── Build RAG prompt ───────────────────────────────────────────────────────
     prompt = (
-        "You are a South African tax assistant. "
-        "Answer the question below using the regulatory context provided. "
-        "Be concise and accurate.\n\n"
+        "You are a South African tax, fraud and compliance assistant. "
+        "Answer the question below using ONLY the context provided. "
+        "Cite the source heading for each legal claim. "
+        "If a source is marked 'unverified', say the point should be confirmed against its linked origin. "
+        "Give the tax year with any rate, threshold or penalty. "
+        "Never state that a named person committed fraud; use 'indicators consistent with'. "
+        "If the context does not support an answer, say so. "
+        "Be concise.\n\n"
         f"Context:\n{context_text}\n\n"
         f"Question: {question}\n\n"
         "Answer:"
@@ -64,7 +76,7 @@ def qa_agent_node(state: dict) -> dict:
     try:
         from agents.llm_wrapper import generate, ByoRequired
         try:
-            answer = generate(prompt, max_new_tokens=256, llm_override=state.get("llm_override"))
+            answer = generate(prompt, max_new_tokens=512, llm_override=state.get("llm_override"))
         except ByoRequired as byo:
             # Built-in token budget used up: tell the user how to continue.
             state["response"] = str(byo)

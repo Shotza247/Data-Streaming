@@ -33,6 +33,7 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 
 COLLECTION_FRAUD = "fraud_similarity"
 COLLECTION_KB    = "regulatory_kb"
+COLLECTION_KNOWLEDGE = "knowledge_base"
 
 # ── Client factory ────────────────────────────────────────────────────────────
 
@@ -112,10 +113,34 @@ def search_regulatory_kb(query_str: str, top_k: int = 3) -> list:
         return []
 
 
+def search_knowledge_base(query_str: str, top_k: int = 4) -> list:
+    """
+    Search the curated `knowledge_base` collection (business context, fraud
+    typologies, regulation) built from the markdown files in knowledge_base/.
+
+    Each ScoredPoint payload has: chunk_id, file, section, source, status,
+    authority, text.  Returns an empty list on error or if the collection is
+    missing, so callers can fall back to `search_regulatory_kb`.
+    """
+    try:
+        from agents.embeddings import embed_text
+        client = get_qdrant_client()
+        return client.query_points(
+            collection_name=COLLECTION_KNOWLEDGE,
+            query=embed_text(query_str),
+            limit=top_k,
+            with_payload=True,
+        ).points
+    except Exception as exc:
+        log.warning(f"search_knowledge_base failed: {exc}")
+        return []
+
+
 def format_kb_context(results: list) -> str:
     """
-    Format regulatory KB search results into a context string
-    suitable for inclusion in a RAG prompt.
+    Format KB search results (either collection) into a context string
+    suitable for inclusion in a RAG prompt. Curated chunks also carry their
+    verification status so the model can warn about unverified content.
     """
     if not results:
         return "No relevant regulatory information found."
@@ -123,9 +148,15 @@ def format_kb_context(results: list) -> str:
     parts = []
     for i, r in enumerate(results, 1):
         p = r.payload or {}
-        parts.append(
-            f"[Source {i}: {p.get('source_doc', 'unknown')} "
-            f"§{p.get('section', '?')}]\n"
-            f"{p.get('text', '')}"
-        )
+        if "file" in p:
+            header = (
+                f"[Source {i}: {p.get('file')} - {p.get('section', '?')} | "
+                f"origin: {p.get('source', 'n/a')} | status: {p.get('status', 'n/a')}]"
+            )
+        else:
+            header = (
+                f"[Source {i}: {p.get('source_doc', 'unknown')} "
+                f"§{p.get('section', '?')}]"
+            )
+        parts.append(f"{header}\n{p.get('text', '')}")
     return "\n\n".join(parts)

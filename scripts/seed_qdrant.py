@@ -72,6 +72,15 @@ def seed_regulatory_kb() -> int:
     return n
 
 
+def seed_knowledge_base() -> int:
+    """Embed the curated markdown knowledge base → knowledge_base collection."""
+    from agents.embed_knowledge_base import run as embed_knowledge
+    log.info("Seeding knowledge_base collection...")
+    n = embed_knowledge()
+    log.info(f"knowledge_base: {n} chunks upserted.")
+    return n
+
+
 def main():
     parser = argparse.ArgumentParser(description="Seed Qdrant vector collections")
     parser.add_argument("--kb-only",      action="store_true", help="Only seed regulatory KB")
@@ -95,6 +104,13 @@ def main():
         except Exception as exc:
             log.error(f"regulatory_kb seeding failed: {exc}")
             results["regulatory_kb"] = f"FAILED: {exc}"
+
+        try:
+            n = seed_knowledge_base()
+            results["knowledge_base"] = f"OK ({n} chunks)"
+        except Exception as exc:
+            log.error(f"knowledge_base seeding failed: {exc}")
+            results["knowledge_base"] = f"FAILED: {exc}"
 
     # ── Seed tax records ───────────────────────────────────────────────────────
     if not args.kb_only:

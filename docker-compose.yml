@@ -367,6 +367,7 @@ services:
       # Mount project modules so dashboard can import storage/, agents/, lineage/
       - ./storage:/storage
       - ./agents:/agents
+      - ./knowledge_base:/knowledge_base:ro
       - ./lineage:/lineage
       - ./mlflow:/mlflow_scripts
       - ./scripts:/scripts
