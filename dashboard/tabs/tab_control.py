@@ -20,6 +20,7 @@ Backend strategy — dual-mode container management:
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -102,6 +103,11 @@ def _podman_api(method: str, path: str, body: dict = None, timeout: int = 8):
             return True, raw
     except Exception as exc:
         return False, str(exc)
+
+
+def _can_control() -> bool:
+    """True if this process can start/stop containers (socket mounted or CLI on PATH)."""
+    return os.path.exists(PODMAN_SOCK) or shutil.which(CONTAINER_CLI) is not None
 
 
 def _container_action(container: str, action: str) -> tuple[bool, str]:
@@ -277,6 +283,13 @@ def _render_health_grid():
 def _render_producer_controls():
     st.subheader("🚀 Producer Controls", divider="orange")
     st.caption("Start, stop, or restart each Kafka data producer. Each producer emits ~1 event/second.")
+    read_only = not _can_control()
+    if read_only:
+        st.info(
+            "Container control is unavailable from inside this container (no Podman socket or CLI). "
+            "Status is shown read-only. Start producers from the host with "
+            "`python scripts/launcher.py up --producers` (or `make start`)."
+        )
 
     for label, cname in PRODUCERS.items():
         info = _producer_status(cname)
@@ -296,7 +309,7 @@ def _render_producer_controls():
                 unsafe_allow_html=True,
             )
         with col_start:
-            if st.button("▶ Start", key=f"start_{cname}", disabled=is_running,
+            if st.button("▶ Start", key=f"start_{cname}", disabled=is_running or read_only,
                          help="Start this producer container"):
                 with st.spinner(f"Starting {cname}…"):
                     ok, msg = _container_action(cname, "start")
@@ -307,7 +320,7 @@ def _render_producer_controls():
                 time.sleep(1)
                 st.rerun()
         with col_stop:
-            if st.button("⏹ Stop", key=f"stop_{cname}", disabled=not is_running,
+            if st.button("⏹ Stop", key=f"stop_{cname}", disabled=not is_running or read_only,
                          help="Stop this producer container"):
                 with st.spinner(f"Stopping {cname}…"):
                     ok, msg = _container_action(cname, "stop")
@@ -318,7 +331,7 @@ def _render_producer_controls():
                 time.sleep(1)
                 st.rerun()
         with col_restart:
-            if st.button("🔄 Restart", key=f"restart_{cname}",
+            if st.button("🔄 Restart", key=f"restart_{cname}", disabled=read_only,
                          help="Restart this producer container"):
                 with st.spinner(f"Restarting {cname}…"):
                     ok, msg = _container_action(cname, "restart")
@@ -345,7 +358,7 @@ def _render_producer_controls():
     # ── Start All / Stop All ──────────────────────────────────────────────────
     c1, c2, c3 = st.columns([1, 1, 4])
     with c1:
-        if st.button("▶▶ Start ALL Producers", type="primary"):
+        if st.button("▶▶ Start ALL Producers", type="primary", disabled=read_only):
             results = []
             for cname in PRODUCERS.values():
                 ok, _ = _container_action(cname, "start")
@@ -354,7 +367,7 @@ def _render_producer_controls():
             time.sleep(1)
             st.rerun()
     with c2:
-        if st.button("⏹⏹ Stop ALL Producers", type="secondary"):
+        if st.button("⏹⏹ Stop ALL Producers", type="secondary", disabled=read_only):
             results = []
             for cname in PRODUCERS.values():
                 ok, _ = _container_action(cname, "stop")
