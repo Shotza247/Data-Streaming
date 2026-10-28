@@ -33,7 +33,7 @@ FLINK_CTX      := ./docker/build/flink
 WAIT_HEALTHY   := 30
 WAIT_WINDOW    := 310
 
-.PHONY: all up down restart logs \
+.PHONY: all start stop status up down restart logs \
         flink-build flink-up flink-logs flink-ui \
         submit-sql submit-job flink-status \
         init-topics topic-list \
@@ -97,6 +97,20 @@ all: _sync-docker-context
 	@echo ""
 	@echo "  KPI windows will appear in Streamlit after ~5 minutes."
 	@echo ""
+
+# =============================================================================
+# LAUNCHER — cross-platform (Windows/WSL/Linux, Podman/Docker), idempotent.
+# Starts services, waits for health, submits only Flink jobs not yet running.
+# Thin wrappers around scripts/launcher.py; run it directly if make is absent.
+# =============================================================================
+start:
+	python scripts/launcher.py up
+
+stop:
+	python scripts/launcher.py down
+
+status:
+	python scripts/launcher.py status
 
 # =============================================================================
 # INFRASTRUCTURE
@@ -264,6 +278,9 @@ help:
 	@echo ""
 	@echo "Open-Source Real-Time Streaming Analytics Platform — Makefile targets"
 	@echo ""
+	@echo "  make start        Idempotent launcher: start, wait healthy, submit missing Flink jobs"
+	@echo "  make stop         Stop all services (launcher)"
+	@echo "  make status       Service health + Flink job status (launcher)"
 	@echo "  make all          Full end-to-end startup (build + start + submit + seed)"
 	@echo "  make up           Start infrastructure services only"
 	@echo "  make down         Stop all services"
