@@ -69,6 +69,8 @@ PostgreSQL  Redis   MinIO    Qdrant       OpenLineage
                           Agent       (RAG)
 ```
 
+Further reading in [`docs/`](docs/): the [demo walkthrough](docs/DEMO.md), the [build log](docs/audit.md) and the [original plan](docs/platform-plan.md). Diagrams: [architecture overview](docs/images/architecture-overview.png), [processing sequence flow](docs/images/sequence-flow.png) and the [context-enrichment gap analysis](docs/images/context-enrichment-gap.png).
+
 ---
 
 ## Key Features
@@ -272,22 +274,20 @@ Environment variables (in `.env`): `HF_API_TOKEN`, `HF_MODEL_LLM` (must be a cha
 
 ```
 data-streaming/
+├── docker-compose.yml          # All services (infra, Flink, ML, dashboard, producers)
+├── Makefile                    # Developer shortcuts (thin wrappers over scripts/launcher.py)
+├── README.md
 │
-├── producers/                  # Kafka event producers
+├── producers/                  # Kafka event producers (own image: producers/Containerfile)
 │   ├── producer_tax_applications.py
 │   ├── producer_taxpayer_profiles.py
 │   ├── producer_fraud_signals.py
 │   ├── producer_audit_events.py
+│   ├── fraud_injection.py      # 2-5 injected high-risk applications per block of 50
 │   ├── base_producer.py
 │   └── topic_init.py
 │
-├── flink-jobs/                 # Flink SQL job definitions
-│   ├── job_01_raw_to_minio.sql
-│   ├── job_02_enrich.sql
-│   ├── job_03_kpi_windows.sql
-│   ├── job_04_fraud_pattern.sql
-│   ├── job_05_cleaned.sql
-│   └── job_06_fraud_signals_to_pg.sql
+├── flink-jobs/                 # Flink SQL job definitions (job_01 .. job_06)
 │
 ├── agents/                     # LangGraph agent system
 │   ├── supervisor.py           # Intent classification and routing
@@ -302,7 +302,9 @@ data-streaming/
 │   ├── embed_tax_records.py    # Seeds fraud_similarity; sync_new() embeds only unseen records
 │   └── langgraph_app.py        # LangGraph graph definition
 │
-├── mlflow/                     # ML model training and registry
+├── knowledge_base/             # Curated markdown the agents retrieve from
+│
+├── mlflow/                     # ML model training, tuning, serving
 │   ├── fraud_model.py          # Features, model families, search space, threshold selection
 │   ├── train_fraud_model.py
 │   ├── tune_fraud_model.py     # Hyperparameter search (CV) logged to MLflow
@@ -310,42 +312,33 @@ data-streaming/
 │   ├── promote_model.py
 │   └── mlflow_config.py
 │
-├── storage/                    # Storage layer helpers
-│   ├── postgres_schema.sql
-│   ├── duckdb_queries.py
-│   ├── minio_client.py
-│   └── redis_schema.md
-│
-├── lineage/                    # OpenLineage integration
-│   ├── openlineage_client.py
-│   ├── lineage_schemas.py
-│   └── verify_lineage.py
-│
-├── dashboard/                  # Streamlit dashboard
-│   ├── app.py
-│   └── tabs/
-│       ├── tab_control.py
-│       ├── tab_tax_kpi.py
-│       ├── tab_fraud.py
-│       ├── tab_agent_chat.py
-│       ├── tab_mlflow.py
-│       └── tab_lineage.py
+├── storage/                    # Storage layer helpers (DuckDB queries, MinIO client, schemas)
+├── lineage/                    # OpenLineage client, schemas and DAG verification
+├── dashboard/                  # Streamlit dashboard (app.py + tabs/)
 │
 ├── scripts/                    # Operational scripts
 │   ├── launcher.py             # Host-side start/stop/status + idempotent Flink job submit
-│   ├── seed_qdrant.py
+│   ├── seed_qdrant.py          # One-off Qdrant seed
+│   ├── sync_qdrant.py          # Continuous fraud_similarity sync (qdrant-sync service)
 │   ├── submit_flink_jobs.py
 │   ├── kpi_to_redis.py
-│   └── smoke_test.py
+│   ├── smoke_test.py
+│   ├── lineage_smoke_test.py   # Emits test OpenLineage events to Marquez
+│   └── dev/                    # Throwaway debugging helpers
 │
-├── tests/                      # Test logs and validation outputs
-├── docker/                     # Container configuration
-├── docker-compose.yml
-├── Makefile
-└── README.md
+├── docker/                     # Container build and init files
+│   ├── build/                  # One build context per image: flink, mlflow, ml-trainer, streamlit
+│   └── init/                   # Mounted at first start: init-postgres.sql, minio-init.sh
+│
+├── tests/                      # pytest suite
+│
+└── docs/
+    ├── DEMO.md                 # Cold-start walkthrough
+    ├── audit.md                # Build log, one entry per sub-task
+    ├── platform-plan.md        # Original design plan
+    ├── build-logs/             # Per-sub-task test logs from the initial build
+    └── images/                 # Architecture, sequence-flow and context-enrichment diagrams
 ```
-
----
 
 ## Service Endpoints
 

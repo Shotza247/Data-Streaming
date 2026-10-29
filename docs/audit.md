@@ -1,5 +1,7 @@
 # Platform Build Audit Log
 
+> **Historical log.** Written during the initial build. File paths have been updated to the current layout: test logs live in `docs/build-logs/`, the Postgres/MinIO init files in `docker/init/`, and `DEMO.md` and this file in `docs/`. The old `docker/Dockerfile.*` files were removed in favour of `docker/build/*/Containerfile`; entries that mention them describe the original build.
+
 ---
 
 ## Entry 001 — Sub-Task 1: Project Scaffold, Docker Compose Infrastructure, and Streamlit Dashboard
@@ -19,8 +21,8 @@
 | `docker/Dockerfile.flink` | Custom Flink 1.18 image with 4 pinned connector JARs (kafka, jdbc, s3, postgresql driver) |
 | `docker/Dockerfile.mlflow` | Python 3.11-slim with mlflow + boto3, S3/MinIO artifact backend |
 | `docker/Dockerfile.streamlit` | Python 3.11-slim with gcc/libpq/curl, healthcheck, .streamlit config baked in |
-| `docker/init-postgres.sql` | Creates taxdb, marquez, mlflow databases + taxuser and marquez roles |
-| `docker/minio-init.sh` | Creates buckets: raw-tax, cleaned-tax, mlflow-artifacts |
+| `docker/init/init-postgres.sql` | Creates taxdb, marquez, mlflow databases + taxuser and marquez roles |
+| `docker/init/minio-init.sh` | Creates buckets: raw-tax, cleaned-tax, mlflow-artifacts |
 
 #### Directory Scaffolds (with .gitkeep)
 `producers/`, `flink-jobs/`, `storage/`, `agents/`, `lineage/`, `mlflow/`, `scripts/`, `tests/`
@@ -41,7 +43,7 @@
 #### Tests
 | File | Description |
 |---|---|
-| `tests/test_subtask1.log` | File inventory, fallback strategy, validation notes |
+| `docs/build-logs/test_subtask1.log` | File inventory, fallback strategy, validation notes |
 
 ### Services Configured in docker-compose.yml
 
@@ -73,7 +75,7 @@
 - Makefile now uses `podman compose` (Podman v4.7+ built-in) with fallback to `podman-compose`
 - Makefile `topic-list` target uses `podman exec` (not `docker exec`)
 - README updated: prerequisites now list Podman Desktop, `podman machine start` added to quickstart
-- `tests/test_subtask1.log` updated with Podman-specific compatibility notes
+- `docs/build-logs/test_subtask1.log` updated with Podman-specific compatibility notes
 - `scripts/submit_flink_jobs.py` (Sub-Task 3) noted to use `podman exec flink-sql-client`
 
 ### Manual Validation Steps Required
@@ -116,7 +118,7 @@ podman compose ps
 | `producers/topic_init.py` | One-shot idempotent topic creation for all 4 topics |
 | `producers/Containerfile` | python:3.11-slim, CMD overridden per service in compose |
 | `producers/requirements.txt` | confluent-kafka==2.4.0, faker==25.2.0, python-dotenv==1.0.1 |
-| `tests/test_subtask2.log` | Topics verified, message counts, issues + resolutions |
+| `docs/build-logs/test_subtask2.log` | Topics verified, message counts, issues + resolutions |
 
 ### Kafka Topics Confirmed
 All 4 topics exist with 3 partitions, replication factor 1:
@@ -155,8 +157,8 @@ All 4 topics exist with 3 partitions, replication factor 1:
 | `lineage/openlineage_client.py` | LineageClient: start/complete/fail, POSTs RunEvent to Marquez, fire-and-forget |
 | `lineage/lineage_schemas.py` | Dataset builders: kafka, minio, postgres, mlflow, duckdb, redis, streamlit + pre-built field schemas |
 | `lineage/requirements.txt` | requests, python-dotenv |
-| `lineage/test_lineage_client.py` | Smoke test: 4 events emitted, Marquez API verified |
-| `tests/test_subtask8a.log` | Full test results and issues resolved |
+| `scripts/lineage_smoke_test.py` | Smoke test: 4 events emitted, Marquez API verified |
+| `docs/build-logs/test_subtask8a.log` | Full test results and issues resolved |
 
 ### Marquez Verification
 Jobs registered after smoke test:
@@ -193,7 +195,7 @@ Jobs registered after smoke test:
 | `scripts/kpi_to_redis.py` | NEW | Polls PostgreSQL tax_kpi_windows → Redis HASHes (15 min TTL), tax:kpi:latest key |
 | `docker-compose.yml` | UPDATED | flink-sql-client keep-alive entrypoint; kpi-poller service added |
 | `Makefile` | UPDATED | flink-up, flink-logs, flink-ui, submit-job, kpi-poller-up, kpi-poller-logs targets |
-| `tests/test_subtask3.log` | NEW | Full design decisions + manual start steps |
+| `docs/build-logs/test_subtask3.log` | NEW | Full design decisions + manual start steps |
 
 ### Flink SQL Job Summary
 
@@ -411,7 +413,7 @@ SARS Tax Tables 2024, VAT Act, SARS Fraud Prevention Policy, PAYE Employer Guide
 | Streamlit Dashboard | NO | HTTP healthcheck |
 
 ### Final Makefile Targets
-All 16 targets documented in DEMO.md and tests/test_subtask8b_10.log.
+All 16 targets documented in DEMO.md and docs/build-logs/test_subtask8b_10.log.
 
 ### Commits
 - `feat(lineage): add verify_lineage.py Marquez DAG verification`
