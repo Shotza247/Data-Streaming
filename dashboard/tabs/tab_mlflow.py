@@ -81,6 +81,8 @@ def _flatten_runs(runs: list) -> pd.DataFrame:
             "f1_score":     metrics.get("f1_score", "—"),
             "precision":    metrics.get("precision", "—"),
             "recall":       metrics.get("recall",  "—"),
+            "threshold":    metrics.get("threshold", "—"),
+            "model":        params.get("model_family", "random_forest"),
             "n_estimators": params.get("n_estimators", "—"),
             "max_depth":    params.get("max_depth", "—"),
         })
@@ -226,6 +228,8 @@ def render():
     st.markdown("<br>", unsafe_allow_html=True)
     _render_training_panel(has_model=latest is not None)
     st.markdown("<br>", unsafe_allow_html=True)
+    _tuning_section()
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Experiment runs table ─────────────────────────────────────────────────
     st.markdown(f"#### Experiment Runs — `{EXPERIMENT}`")
@@ -254,6 +258,8 @@ def render():
             "f1_score":     st.column_config.NumberColumn("F1 Score",  format="%.4f"),
             "precision":    st.column_config.NumberColumn("Precision", format="%.4f"),
             "recall":       st.column_config.NumberColumn("Recall",    format="%.4f"),
+            "threshold":    st.column_config.NumberColumn("Threshold", format="%.3f"),
+            "model":        st.column_config.TextColumn("Model"),
             "n_estimators": st.column_config.TextColumn("n_estimators"),
             "max_depth":    st.column_config.TextColumn("max_depth"),
         }
@@ -295,6 +301,11 @@ def render():
         st.rerun()
 
 
+def _tuning_section():
+    from tabs.mlflow_tuning import render_tuning_panel
+    render_tuning_panel()
+
+
 def _render_live_scoring():
     """Score the newest streamed events with the served model."""
     st.markdown("#### Live scoring — newest streamed events")
@@ -302,7 +313,13 @@ def _render_live_scoring():
                "`is_fraud` is the label carried by the event, shown for comparison.")
 
     n = st.slider("Events to score", 10, 200, 50, step=10, key="live_n")
-    threshold = st.slider("Flag as fraud at probability ≥", 0.1, 0.9, 0.5, step=0.05, key="live_thr")
+    try:
+        model_thr = float(requests.get(f"{MODEL_API_URL}/health", timeout=3).json().get("threshold", 0.5))
+    except Exception:
+        model_thr = 0.5
+    threshold = st.slider("Flag as fraud at probability ≥", 0.05, 0.95,
+                          min(max(round(model_thr * 20) / 20, 0.05), 0.95), step=0.05, key="live_thr",
+                          help=f"The registered model's tuned decision threshold is {model_thr:.2f}.")
 
     try:
         import sys
@@ -318,7 +335,8 @@ def _render_live_scoring():
                 icon="ℹ️")
         return
 
-    cols = ["province", "taxable_income", "employment_type", "employment_status", "filing_status"]
+    cols = ["province", "taxable_income", "employment_type", "employment_status", "filing_status",
+            "customer_id", "application_id"]
     try:
         r = requests.post(f"{MODEL_API_URL}/predict",
                           json={"records": events[cols].to_dict(orient="records")}, timeout=15)

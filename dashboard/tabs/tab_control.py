@@ -60,6 +60,8 @@ SERVICES = {
     "Kafka UI":        {"container": "kafka-ui",         "port": 8080,  "proto": "http", "path": "/"},
     "Streamlit":       {"container": "streamlit",        "port": 8501,  "proto": "http", "path": "/healthz"},
     "KPI Poller":      {"container": "kpi-poller",       "port": None,  "proto": "container"},
+    "Qdrant Sync":     {"container": "qdrant-sync",      "port": None,  "proto": "container"},
+    "Model API":       {"container": "model-api",        "port": None,  "proto": "container"},
 }
 
 
@@ -678,7 +680,7 @@ def _render_log_viewer():
         "kafka", "zookeeper", "postgres", "redis", "minio",
         "qdrant", "flink-jobmanager", "flink-taskmanager",
         "flink-sql-client", "marquez", "marquez-web",
-        "mlflow", "streamlit", "kpi-poller",
+        "mlflow", "streamlit", "kpi-poller", "qdrant-sync", "model-api",
     ]
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
