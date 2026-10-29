@@ -321,6 +321,10 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MARQUEZ_API_URL: ${MARQUEZ_API_URL}
+      # Container sees every host core but is capped at ~1 CPU; without this
+      # OpenMP spawns a thread per core and gradient boosting stalls.
+      OMP_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
     networks:
       - streaming-net
 
@@ -347,6 +351,8 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MODEL_API_PORT: "8000"
+      OMP_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
     networks:
       - streaming-net
 
@@ -535,6 +541,38 @@ services:
     networks:
       - streaming-net
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # Qdrant sync: keeps the fraud_similarity collection current. Every
+  # QDRANT_SYNC_INTERVAL_SEC it looks at the newest cleaned records and embeds
+  # only those Qdrant does not have yet (point id = uuid5(application_id), so
+  # it is idempotent). Reuses the streamlit image (fastembed + qdrant-client +
+  # duckdb) so no extra image is built. `make seed` is still the full reload.
+  # ─────────────────────────────────────────────────────────────────────────
+  qdrant-sync:
+    image: localhost/datastreaming_streamlit:latest
+    container_name: qdrant-sync
+    depends_on:
+      - qdrant
+      - minio
+    entrypoint: ["python", "/scripts/sync_qdrant.py"]
+    working_dir: /scripts
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./storage:/storage:ro
+      - ./agents:/agents:ro
+      - fastembed_cache:/tmp/fastembed_cache
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      QDRANT_SYNC_INTERVAL_SEC: ${QDRANT_SYNC_INTERVAL_SEC:-30}
+      QDRANT_SYNC_LIMIT: ${QDRANT_SYNC_LIMIT:-5000}
+    restart: unless-stopped
+    networks:
+      - streaming-net
+
 # ── Networks & Volumes ───────────────────────────────────────────────────────
 networks:
   streaming-net:
@@ -543,3 +581,4 @@ networks:
 
 volumes:
   qdrant_storage:
+  fastembed_cache:

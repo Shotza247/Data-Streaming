@@ -39,7 +39,7 @@ WAIT_WINDOW    := 310
         init-topics topic-list \
         producers-up producers-down producers-logs \
         kpi-poller-up kpi-poller-logs \
-        seed seed-kb train promote \
+        seed seed-kb sync-qdrant sync-qdrant-logs train promote \
         smoke-test verify-lineage \
         minio-buckets dashboard reset help
 
@@ -230,6 +230,13 @@ seed:
 seed-kb:
 	python scripts/seed_qdrant.py --kb-only
 
+# Continuous fraud_similarity sync (the qdrant-sync service does this on its own).
+sync-qdrant:
+	podman compose up -d qdrant-sync
+
+sync-qdrant-logs:
+	podman logs -f qdrant-sync
+
 train:
 	podman start -a ml-trainer
 
@@ -298,6 +305,7 @@ help:
 	@echo ""
 	@echo "  make seed         Seed Qdrant collections (KB + fraud vectors)"
 	@echo "  make seed-kb      Seed Qdrant regulatory KB only (fast, no MinIO dep)"
+	@echo "  make sync-qdrant  Start the continuous fraud_similarity sync service"
 	@echo "  make train        Train MLflow fraud detection model"
 	@echo "  make promote      Promote latest model from Staging to Production"
 	@echo ""
