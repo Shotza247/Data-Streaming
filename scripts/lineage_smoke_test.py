@@ -1,17 +1,17 @@
 """
-lineage/test_lineage_client.py
+scripts/lineage_smoke_test.py
 
 Smoke test for Sub-Task 8 Phase A.
 Verifies that LineageClient and lineage_schemas work correctly
 by emitting a test RunEvent to Marquez and confirming it lands.
 
 Run from project root:
-    python lineage/test_lineage_client.py
+    python scripts/lineage_smoke_test.py
 """
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lineage"))
 
 from openlineage_client import LineageClient
 from lineage_schemas import (
