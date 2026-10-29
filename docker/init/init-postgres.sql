@@ -1,4 +1,4 @@
--- docker/init-postgres.sql
+-- docker/init/init-postgres.sql
 --
 -- PostgreSQL initialisation script for the Tax Analytics Platform.
 -- Runs inside the postgres container on first startup as the POSTGRES_USER

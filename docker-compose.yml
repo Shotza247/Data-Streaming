@@ -157,7 +157,7 @@ services:
       POSTGRES_PASSWORD: taxpass
       POSTGRES_DB: taxdb
     volumes:
-      - ./docker/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./docker/init/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U taxuser -d taxdb"]
       interval: 10s
@@ -215,7 +215,7 @@ services:
         condition: service_healthy
     env_file: .env
     volumes:
-      - ./docker/minio-init.sh:/init.sh
+      - ./docker/init/minio-init.sh:/init.sh
     entrypoint: ["/bin/sh", "/init.sh"]
     networks:
       - streaming-net

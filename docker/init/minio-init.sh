@@ -1,5 +1,5 @@
 #!/bin/sh
-# docker/minio-init.sh
+# docker/init/minio-init.sh
 #
 # One-shot initialisation script that runs inside the minio/mc container.
 # Waits for MinIO to become available, configures the mc alias, creates
