@@ -94,9 +94,10 @@ PostgreSQL  Redis   MinIO    Qdrant       OpenLineage
 
 ### AI & Machine Learning
 - MLflow tracks fraud detection model experiments and hosts the model registry
-- `fraud-detector` model trained on application features: province, taxable income, employment type/status, filing status
+- `fraud-detector` model trained on application features (province, taxable income, employment type/status, filing status) plus engineered features: income relative to the employment-type ceiling, log income and how often the customer has filed (see [Fraud model and tuning](#fraud-model-and-tuning))
+- A decision threshold chosen on out-of-fold predictions is stored with the model, so predictions use the tuned operating point instead of a fixed 0.5
 - HuggingFace `all-MiniLM-L6-v2` embeddings for semantic search
-- Qdrant collections: `regulatory_kb` (50 SA tax law chunks) and `fraud_similarity` (historical case embeddings)
+- Qdrant collections: `regulatory_kb` (50 SA tax law chunks) and `fraud_similarity` (case embeddings, kept in sync with the stream by the `qdrant-sync` service)
 
 ### Agentic AI (LangGraph)
 
@@ -116,7 +117,7 @@ Six tabs covering:
 - **Tax KPIs** — real-time windowed metrics from Redis/DuckDB
 - **Fraud** — fraud signal monitoring and risk scoring
 - **Agent Chat** — conversational interface to the LangGraph agent system
-- **MLflow** — experiment and model registry browser
+- **MLflow** — experiment and model registry browser, live scoring, and a **hyperparameter tuning** panel (search space, objective, best config by precision / recall / F1)
 - **Lineage** — pipeline lineage viewer
 
 ---
@@ -218,9 +219,33 @@ python scripts/launcher.py jobs [filter]                  # submit only the Flin
 - **Idempotent:** Flink jobs are matched by sink table against the running jobs in the Flink REST API. Jobs already running are skipped, so re-running never creates duplicates. A job file that is only partially running is reported and left alone.
 - **Health-based waits:** `up` polls Kafka, Postgres, MinIO, Flink and Marquez instead of sleeping for a fixed time.
 - **After a restart:** Flink job state is not persisted across a JobManager restart. Run `make start` (or `python scripts/launcher.py jobs`) to bring the jobs back. On a server this can be scheduled with cron or a systemd timer.
-- **Not included:** Qdrant seeding and MLflow training are separate (`make seed`, `make train`).
+- **Not included:** the initial Qdrant seed and MLflow training are separate (`make seed`, `make train`, or the dashboard MLflow tab). `qdrant-sync` is started by `up` and keeps the similarity index current afterwards.
 
 **Control Center and container control.** Start/Stop/Restart in the Control Center need either the Podman socket mounted into the Streamlit container or a container CLI inside it. The socket mount is unreliable on Windows/WSL. When neither is available, the Producer Controls are shown read-only with a pointer to the launcher; status, Flink job views and logs still work.
+
+---
+
+## Fraud model and tuning
+
+**Injected fraud.** The tax-applications producer injects **2 to 5 highly fraudulent applications in every block of 50**, at random positions within the block (`producers/fraud_injection.py`). Each injected case carries at least two independent red flags (income inflation, UNEMPLOYED with a large income, or a repeat filer with inflated income), so it is clearly fraudulent to both the label and the model. Tune it with `FRAUD_BLOCK_SIZE`, `FRAUD_INJECT_MIN` and `FRAUD_INJECT_MAX`. The producer image copies its code at build time, so rebuild it after changing them: `podman compose --profile producers up -d --build producer-tax-applications`.
+
+**Why the old model was weak.** It saw raw income and four categoricals only, but the labels depend on income relative to the employment-type ceiling and on how often a customer files. On the streamed data it scored about P 0.37 / R 0.23 / F1 0.29. The model now also uses `income_ratio`, `above_ceiling`, `log_income` and `customer_filings` (learned inside the pipeline, so callers only send `customer_id` / `application_id`). Cross-validated F1 on the same data rose to about 0.75 to 0.78.
+
+**Threshold.** The decision threshold is chosen on out-of-fold predictions of the training split and stored with the model. Metrics are reported on a held-out test split. `/predict` returns `fraud_probability`, `predicted_fraud` and the `threshold`.
+
+**Tuning panel.** The dashboard **MLflow** tab has a tuning section where you can:
+
+- pick model families (Random Forest, Gradient Boosting, Logistic Regression) and edit each hyperparameter's search range
+- choose the objective: **F1**, **recall** (with a minimum-precision floor) or **precision** (with a minimum-recall floor)
+- set trials per family and CV folds, and watch live progress
+- compare the best configuration of each family against the default, with CV and held-out test precision / recall / F1, the top trials and every trial's hyperparameters
+- train and register a model with the winning configuration in one click
+
+Every trial is logged to the `tax-fraud-tuning` MLflow experiment (a parent run plus one nested run per trial). The same search can be run from the command line: `python mlflow/tune_fraud_model.py --n-trials 12 --objective f1`. The model API exposes `GET /tune/space`, `POST /tune`, `GET /tune/status` and `GET /tune/result`. Training and tuning share one job slot, so a second request while one is running returns 409.
+
+**Qdrant sync.** `make seed` is a one-off snapshot. The `qdrant-sync` service (`scripts/sync_qdrant.py`) runs continuously: every `QDRANT_SYNC_INTERVAL_SEC` (default 30) it looks at the newest `QDRANT_SYNC_LIMIT` (default 5000) cleaned records and embeds only those not yet in `fraud_similarity`. Point ids are `uuid5(application_id)`, so it is idempotent and safe to restart. Payloads now also carry `employment_status`, `filing_status` and `processed_at`. Run it once with `python scripts/sync_qdrant.py --once`.
+
+**CPU note.** The ML containers see every host core but are capped at about one CPU. `OMP_NUM_THREADS` and `OPENBLAS_NUM_THREADS` are set to 2 for `ml-trainer` and `model-api`; without it, gradient boosting stalls on thread oversubscription.
 
 ---
 
@@ -274,11 +299,14 @@ data-streaming/
 │   ├── qdrant_search.py        # Vector search helpers
 │   ├── embeddings.py           # Embedding utilities
 │   ├── embed_regulatory_kb.py  # Seeds regulatory_kb collection
-│   ├── embed_tax_records.py    # Seeds fraud_similarity collection
+│   ├── embed_tax_records.py    # Seeds fraud_similarity; sync_new() embeds only unseen records
 │   └── langgraph_app.py        # LangGraph graph definition
 │
 ├── mlflow/                     # ML model training and registry
+│   ├── fraud_model.py          # Features, model families, search space, threshold selection
 │   ├── train_fraud_model.py
+│   ├── tune_fraud_model.py     # Hyperparameter search (CV) logged to MLflow
+│   ├── serve_model.py          # Model API: /predict, /train, /tune
 │   ├── promote_model.py
 │   └── mlflow_config.py
 │
@@ -355,7 +383,9 @@ make topic-list  # List Kafka topics
 
 **AI Components**
 ```bash
-make seed        # Embed and upsert all Qdrant collections
+make seed             # Embed and upsert all Qdrant collections (full reload)
+make sync-qdrant      # Start the continuous fraud_similarity sync service
+make sync-qdrant-logs # Follow the sync service
 ```
 
 **Validation**

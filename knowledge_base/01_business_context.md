@@ -76,7 +76,7 @@ Severity scale: LOW, MEDIUM, HIGH, CRITICAL. Unknown severities are normalised t
 Source: producers/producer_tax_applications.py
 Status: internal; read before using any model metric
 
-In the current data the producer sets is_fraud = True when any of these hold: income was inflated 3 to 8 times (about 4 percent of events), the customer is in a small repeat-filer pool (about 8 percent of events), or a random 1 percent. The label is therefore a rule-generated stand-in, not a confirmed SARS outcome.
+In the current data the producer sets is_fraud = True when any of these hold: income was inflated 3 to 8 times (about 4 percent of events), the customer is in a small repeat-filer pool (about 8 percent of events), or a random 1 percent. In addition, for every block of 50 applications the producer injects 2 to 5 highly fraudulent cases at random positions (income 2.5 to 6 times the employment-type ceiling, an unemployed filer with a large income, or a repeat filer with inflated income). The label is therefore a rule-generated stand-in, not a confirmed SARS outcome.
 
 Consequences the agent must state when relevant:
 - A model trained on this label learns the generator's rules, not real fraud.
@@ -88,7 +88,9 @@ Consequences the agent must state when relevant:
 Source: agents/fraud_agent.py; mlflow/serve_model.py
 Status: internal
 
-The `fraud-detector` model returns fraud_probability from province, taxable_income, employment_type, employment_status and filing_status only. It does not see customer history, velocity or the signals.
+The `fraud-detector` model returns fraud_probability from province, taxable_income, employment_type, employment_status and filing_status, plus three derived features: income relative to the ceiling for the employment type (income_ratio), log income, and the number of applications the customer has filed so far (customer_filings, a velocity proxy learned from training data). It does not see the fraud signals or enriched taxpayer fields.
+
+The service also returns predicted_fraud, using a decision threshold that was tuned on out-of-fold predictions and stored with the model version. That threshold is the model's own operating point and is usually different from the bands below. The bands below are a separate triage convention for analysts.
 
 - 0.75 and above: HIGH RISK, flag for manual review.
 - 0.45 to below 0.75: MEDIUM RISK, monitor and investigate.

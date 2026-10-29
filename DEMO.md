@@ -133,6 +133,13 @@ Verify Qdrant collections at http://localhost:6333/dashboard:
 - `fraud_similarity` — should show embedded tax records
 - `regulatory_kb` — should show 50 SA tax law chunks
 
+`make seed` is a one-off snapshot. The `qdrant-sync` service (started with the rest of the stack) then
+keeps `fraud_similarity` current by embedding only new cleaned records every 30 seconds:
+
+```bash
+make sync-qdrant-logs     # "Embedded N new record(s)" appears as applications arrive
+```
+
 ---
 
 ## Step 7 — Train the MLflow Fraud Detection Model
@@ -153,6 +160,19 @@ Optionally promote to Production:
 ```bash
 make promote
 ```
+
+The producer injects 2 to 5 highly fraudulent applications in every block of 50, so a few
+minutes of streaming gives the model clear positive examples. Training also picks a decision
+threshold from out-of-fold predictions; the run records `threshold`, precision, recall and F1
+on a held-out test split.
+
+To find the best hyperparameters, use the tuning panel in the dashboard (next steps) or:
+
+```bash
+podman exec model-api python /mlflow_scripts/tune_fraud_model.py --n-trials 12 --objective f1
+```
+
+Results are logged to the **tax-fraud-tuning** experiment in the MLflow UI.
 
 ---
 
@@ -189,8 +209,16 @@ and tax questions to the RAG + flan-t5 Q&A agent.
 
 ### Tab 5 — MLflow Status
 - Model stage badge (Staging / Production)
-- All experiment runs with accuracy, F1, precision, recall columns
+- All experiment runs with accuracy, F1, precision, recall, threshold and model columns
 - Metrics bar chart for the best run
+- **Hyperparameter tuning** panel:
+  1. Open *Configure search*, choose model families, the objective (F1, recall with a precision floor,
+     or precision with a recall floor), trials per family and CV folds. Edit any hyperparameter range.
+  2. Click **Start tuning** and watch progress.
+  3. Read the best configuration per family against the default (CV and held-out test
+     precision / recall / F1), the top trials chart, and the table of every trial.
+  4. Click **Train registered model with this config** to register the winner as a new `fraud-detector` version.
+- Live scoring uses the model's tuned threshold as the default slider value
 
 ---
 
