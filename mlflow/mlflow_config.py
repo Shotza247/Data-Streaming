@@ -25,24 +25,28 @@ ARTIFACT_BUCKET  = os.getenv("MINIO_BUCKET_MLFLOW", "mlflow-artifacts")
 
 # ── Experiment / model names ──────────────────────────────────────────────────
 EXPERIMENT_NAME     = "tax-fraud-detection"
+TUNING_EXPERIMENT_NAME = "tax-fraud-tuning"     # hyperparameter-search trials
 MODEL_NAME          = "fraud-detector"
 TRAINING_STAGE      = "Staging"
 PRODUCTION_STAGE    = "Production"
 
 # ── Feature engineering config ────────────────────────────────────────────────
+# Raw columns the model accepts; engineered features (income ratio, customer
+# filing count, ...) are built inside the pipeline, see mlflow/fraud_model.py.
 CATEGORICAL_FEATURES = ["province", "employment_type", "employment_status", "filing_status"]
 NUMERIC_FEATURES     = ["taxable_income"]
 TARGET_COLUMN        = "is_fraud"
 
 # ── Model training defaults ────────────────────────────────────────────────────
-RF_N_ESTIMATORS  = int(os.getenv("RF_N_ESTIMATORS",  "100"))
-RF_MAX_DEPTH     = int(os.getenv("RF_MAX_DEPTH",     "8"))
+RF_N_ESTIMATORS  = int(os.getenv("RF_N_ESTIMATORS",  "300"))
+RF_MAX_DEPTH     = int(os.getenv("RF_MAX_DEPTH",     "12"))
+RF_MIN_SAMPLES_LEAF = int(os.getenv("RF_MIN_SAMPLES_LEAF", "2"))
 RF_RANDOM_STATE  = int(os.getenv("RF_RANDOM_STATE",  "42"))
 TEST_SIZE        = float(os.getenv("TEST_SIZE",       "0.2"))
 MIN_TRAIN_ROWS   = int(os.getenv("MIN_TRAIN_ROWS",   "50"))   # skip training if fewer rows
 
 
-def setup_mlflow():
+def setup_mlflow(experiment_name: str = EXPERIMENT_NAME):
     """
     Configure MLflow to use the tracking server and MinIO artifact store.
     Call this at the top of any script that logs runs.
@@ -60,14 +64,14 @@ def setup_mlflow():
     _os.environ["MLFLOW_S3_ENDPOINT_URL"] = s3_endpoint
 
     # Create or get the experiment
-    experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+    experiment = mlflow.get_experiment_by_name(experiment_name)
     if experiment is None:
         mlflow.create_experiment(
-            name=EXPERIMENT_NAME,
-            artifact_location=f"s3://{ARTIFACT_BUCKET}/{EXPERIMENT_NAME}",
+            name=experiment_name,
+            artifact_location=f"s3://{ARTIFACT_BUCKET}/{experiment_name}",
         )
 
-    mlflow.set_experiment(EXPERIMENT_NAME)
+    mlflow.set_experiment(experiment_name)
     return mlflow
 
 
