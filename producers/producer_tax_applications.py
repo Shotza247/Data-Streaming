@@ -18,6 +18,9 @@ Schema (matches reference architecture image exactly):
     filing_status       — FIRST_TIME | RETURNING | AMENDED
     is_fraud            — bool; set True ~5% of the time, more often on anomalous records
                           (used as synthetic training label for MLflow model)
+
+High-risk injection: in every block of 50 applications, 2 to 5 randomly placed
+applications are replaced by highly fraudulent profiles (see fraud_injection.py).
 """
 
 import os
@@ -27,6 +30,7 @@ from datetime import date, timedelta
 
 from faker import Faker
 from base_producer import BaseProducer
+from fraud_injection import BlockInjector, apply_high_risk
 
 fake = Faker("en_GB")   # en_ZA removed in Faker 25.x — en_GB gives realistic names
 
@@ -68,6 +72,8 @@ class TaxApplicationProducer(BaseProducer):
         super().__init__()
         # Track how many times each repeat filer has appeared this session
         self._repeat_counts: dict[str, int] = {}
+        # 2-5 high-risk applications injected per block of 50
+        self._injector = BlockInjector()
 
     def generate_message(self) -> dict:
         # ~8% of records come from the repeat filer pool (velocity anomaly)
@@ -97,7 +103,7 @@ class TaxApplicationProducer(BaseProducer):
         days_ago = random.randint(0, 365)
         submitted = (date.today() - timedelta(days=days_ago)).isoformat()
 
-        return {
+        record = {
             "application_id":  str(uuid.uuid4()),
             "customer_id":     customer_id,
             "customer_name":   fake.name(),
@@ -112,6 +118,16 @@ class TaxApplicationProducer(BaseProducer):
             "filing_status":   random.choice(FILING_STATUSES),
             "is_fraud":        is_fraud,
         }
+
+        if self._injector.next():
+            record, pattern = apply_high_risk(
+                record, random, INCOME_RANGES, EMPLOYMENT_STATUSES, REPEAT_FILERS
+            )
+            self.logger.info(
+                "Injected high-risk application %s (%s, income=%.0f)",
+                record["application_id"], pattern, record["taxable_income"],
+            )
+        return record
 
 
 if __name__ == "__main__":
