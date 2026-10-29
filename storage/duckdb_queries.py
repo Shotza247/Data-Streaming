@@ -87,6 +87,41 @@ def _cleaned_source() -> str:
     return f"read_json_auto('{CLEANED_GLOB}', {_JSON_OPTS})"
 
 
+# ── Arrival-ordered reads ─────────────────────────────────────────────────────
+# `dt=` is the application's submitted_date, which the producer draws from the
+# last 365 days, so the "newest dt partitions" hold only a few percent of the
+# records that actually arrived recently. Training and Qdrant sync therefore
+# select files by when they were written (S3 LastModified) instead.
+
+_FILE_LIST_TTL = 20          # seconds; listing 100k+ objects takes ~15 s
+_file_cache: dict = {"at": 0.0, "files": []}
+
+
+def _list_part_files() -> list:
+    """(key, last_modified) of every cleaned part file, newest first (briefly cached)."""
+    import time
+    import boto3
+    if time.time() - _file_cache["at"] < _FILE_LIST_TTL and _file_cache["files"]:
+        return _file_cache["files"]
+    endpoint = MINIO_ENDPOINT if "://" in MINIO_ENDPOINT else f"http://{MINIO_ENDPOINT}"
+    s3 = boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=MINIO_ACCESS_KEY,
+                      aws_secret_access_key=MINIO_SECRET_KEY, region_name="us-east-1")
+    files = []
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET_CLEANED):
+        files += [(o["Key"], o["LastModified"]) for o in page.get("Contents", [])
+                  if "/part-" in o["Key"]]
+    files.sort(key=lambda f: f[1], reverse=True)
+    _file_cache.update(at=time.time(), files=files)
+    return files
+
+
+def _select_files(files: list, since=None, max_files: int = 5000) -> list:
+    """Newest `max_files` of `files` (newest first), optionally only those written after `since`."""
+    if since is not None:
+        files = [f for f in files if f[1] > since]
+    return files[:max_files]
+
+
 
 
 # ── DuckDB connection factory ─────────────────────────────────────────────────
@@ -201,6 +236,8 @@ def get_fraud_summary():
 def get_cleaned_data_for_ml(n_rows: int = 50000):
     """
     Return a clean DataFrame of labelled tax application records for ML training.
+    Reads the most recently written files (by arrival), so training sees the
+    stream as it is now rather than a few submitted_date partitions.
 
     Columns: application_id, customer_id, province, taxable_income,
              employment_type, employment_status, filing_status, is_fraud
@@ -208,6 +245,13 @@ def get_cleaned_data_for_ml(n_rows: int = 50000):
     Used by: mlflow/train_fraud_model.py
     Lineage: minio://cleaned-tax → mlflow:training_dataset
     """
+    try:
+        # Each part file holds ~1.2 rows, so n_rows files covers n_rows records.
+        paths = [f"s3://{BUCKET_CLEANED}/{k}" for k, _ in _select_files(_list_part_files(), None, int(n_rows))]
+        source = f"read_json_auto({paths!r}, {_JSON_OPTS})" if paths else _cleaned_source()
+    except Exception as exc:
+        log.warning(f"Arrival-ordered file listing failed, using recent partitions: {exc}")
+        source = _cleaned_source()
     sql = f"""
         SELECT
             application_id,
@@ -218,10 +262,10 @@ def get_cleaned_data_for_ml(n_rows: int = 50000):
             COALESCE(employment_status, 'UNKNOWN') AS employment_status,
             COALESCE(filing_status, 'UNKNOWN')     AS filing_status,
             COALESCE(is_fraud, false)              AS is_fraud
-        FROM {_cleaned_source()}
+        FROM {source}
         WHERE application_id IS NOT NULL
           AND taxable_income >= 0
-        LIMIT {n_rows}
+        LIMIT {int(n_rows)}
     """
     return _run_query(
         sql,
@@ -261,6 +305,40 @@ def get_recent_events(n_rows: int = 50):
         ["application_id", "customer_id", "province", "taxable_income", "employment_type",
          "employment_status", "filing_status", "is_fraud", "flink_processed_at"],
     )
+
+
+def get_recent_arrivals(since=None, max_files: int = 5000):
+    """
+    Records from the most recently written cleaned files (by arrival time).
+
+    Returns (DataFrame, newest_last_modified). Pass the previous
+    `newest_last_modified` as `since` to read only what arrived after it.
+    Columns as get_recent_events().
+
+    Used by: agents/embed_tax_records.sync_new (continuous Qdrant sync).
+    """
+    columns = ["application_id", "customer_id", "province", "taxable_income", "employment_type",
+               "employment_status", "filing_status", "is_fraud", "flink_processed_at"]
+    files = _select_files(_list_part_files(), since, max_files)
+    if not files:
+        import pandas as pd
+        return pd.DataFrame(columns=columns), since
+    paths = [f"s3://{BUCKET_CLEANED}/{k}" for k, _ in files]
+    sql = f"""
+        SELECT
+            application_id,
+            customer_id,
+            COALESCE(province, 'UNKNOWN')          AS province,
+            COALESCE(taxable_income, 0.0)           AS taxable_income,
+            COALESCE(employment_type, 'UNKNOWN')   AS employment_type,
+            COALESCE(employment_status, 'UNKNOWN') AS employment_status,
+            COALESCE(filing_status, 'UNKNOWN')     AS filing_status,
+            COALESCE(is_fraud, false)               AS is_fraud,
+            flink_processed_at
+        FROM read_json_auto({paths!r}, {_JSON_OPTS})
+        WHERE application_id IS NOT NULL
+    """
+    return _run_query(sql, columns), files[0][1]
 
 
 def get_income_distribution(n_buckets: int = 20):
