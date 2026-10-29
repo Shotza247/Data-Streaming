@@ -28,6 +28,7 @@ env/
 
 # Logs
 *.log
+!docs/build-logs/*.log
 logs/
 
 # OS

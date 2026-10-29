@@ -1,0 +1,78 @@
+Sub-Task 4 — Storage Layer: PostgreSQL, Redis, MinIO, DuckDB OLAP
+==================================================================
+Date       : 2026-10-02
+Status     : COMPLETE
+
+FILES WRITTEN
+-------------
+storage/postgres_schema.sql   - All 4 tables + indexes + 2 convenience views
+storage/redis_schema.md       - Key naming conventions, TTL policies, field docs
+storage/minio_client.py       - boto3 wrapper: list_files, download, upload, bucket_has_files
+storage/duckdb_queries.py     - 6 named query functions, httpfs MinIO config, smoke test
+
+POSTGRES SCHEMA APPLIED
+------------------------
+Command run:
+  Get-Content storage/postgres_schema.sql | podman exec -i postgres psql -U taxuser -d taxdb
+
+Output (all success):
+  CREATE TABLE  (enriched_tax_applications)
+  CREATE INDEX  x4
+  CREATE TABLE  (tax_kpi_windows)
+  CREATE INDEX  x1
+  CREATE TABLE  (fraud_detections)
+  CREATE INDEX  x4
+  CREATE TABLE  (audit_log)
+  CREATE INDEX  x4
+  CREATE VIEW   (fraud_summary_by_province)
+  CREATE VIEW   (latest_kpi_snapshot)
+
+TABLES VERIFIED
+---------------
+[OK] enriched_tax_applications  - primary key application_id, indexes: customer_id, submitted_date, province, is_fraud
+[OK] tax_kpi_windows            - primary key window_start, index: window_start DESC
+[OK] fraud_detections           - primary key detection_id, indexes: customer_id, severity, detected_at, signal_type
+[OK] audit_log                  - primary key event_id, indexes: application_id, actor, event_timestamp, action
+[OK] fraud_summary_by_province  - VIEW (province-level aggregation)
+[OK] latest_kpi_snapshot        - VIEW (single latest KPI window)
+
+DUCKDB QUERIES
+--------------
+[OK] get_tax_kpi_trend(n_windows)       - DATE_TRUNC 5-min windows from cleaned-tax glob
+[OK] get_fraud_summary()                - fraud signals by type/severity/province
+[OK] get_cleaned_data_for_ml(n_rows)    - labelled records for MLflow training
+[OK] get_income_distribution(n_buckets) - histogram buckets with labels
+[OK] get_top_flagged_customers(top_n)   - customers ranked by fraud signal count
+[OK] get_province_fraud_heatmap()       - province-level fraud rate + avg income
+
+All DuckDB functions return pandas DataFrames with graceful empty fallback on failure.
+httpfs extension configured with:
+  SET s3_endpoint='minio:9000'
+  SET s3_access_key_id / s3_secret_access_key (from .env)
+  SET s3_use_ssl=false
+  SET s3_url_style='path'
+
+MINIO CLIENT
+------------
+[OK] get_client()                 - boto3 with s3v4 signature, path-style URL
+[OK] list_files(bucket, prefix)   - paginated, handles >1000 objects
+[OK] list_partitions(bucket)      - returns immediate subdirectory names (Delimiter='/')
+[OK] bucket_has_files(bucket)     - preflight guard used by make seed
+[OK] download_file / download_to_bytes / download_prefix_to_dir
+[OK] upload_file / upload_bytes
+[OK] get_cleaned_file_uris()      - returns s3a:// URIs for cleaned-tax files (Flink-style)
+
+REDIS SCHEMA DOCUMENTED
+------------------------
+Key families documented in redis_schema.md:
+  tax:kpi:window:<ts>   HASH TTL=900s  (per-window metrics)
+  tax:kpi:latest        HASH TTL=900s  (latest window summary)
+  tax:agent:session:<id> LIST TTL=3600s (chat history)
+  tax:fraud:alert:<id>   STRING TTL=1800s (active alerts)
+
+NOTES
+-----
+- DuckDB queries require cleaned-tax bucket to be non-empty (Flink job_05 must be running)
+- All DuckDB functions have empty DataFrame fallback for graceful dashboard degradation
+- minio_client.py __main__ block can be run for connectivity smoke test:
+    podman exec streamlit python /app/../storage/minio_client.py

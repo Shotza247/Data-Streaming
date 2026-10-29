@@ -1,0 +1,95 @@
+Sub-Task 3 — Flink SQL Jobs: Stream Processing, Enrichment, and Output Routing
+===============================================================================
+Date       : 2026-10-02
+Status     : COMPLETE (all files written; Flink containers not yet started — manual step below)
+
+FILES WRITTEN
+-------------
+flink-jobs/job_01_raw_to_minio.sql   (written in prior session, committed here)
+flink-jobs/job_02_enrich.sql         (written in prior session, committed here)
+flink-jobs/job_03_kpi_windows.sql    (written + FIRST_VALUE bug fixed -> MAX(province))
+flink-jobs/job_04_fraud_pattern.sql  NEW
+flink-jobs/job_05_cleaned.sql        NEW
+scripts/submit_flink_jobs.py         NEW
+scripts/kpi_to_redis.py              NEW
+docker-compose.yml                   UPDATED (flink-sql-client entrypoint, kpi-poller service)
+Makefile                             UPDATED (flink-up, flink-logs, submit-job, kpi-poller targets)
+
+DESIGN DECISIONS
+----------------
+1. job_03 FIRST_VALUE fix
+   FIRST_VALUE window function cannot be combined with tumbling GROUP BY in Flink SQL.
+   Replaced with MAX(province) — deterministic, same GROUP BY scope, Flink-compatible.
+
+2. job_04 CEP approach
+   MATCH_RECOGNIZE requires Flink CEP JAR not included in our image.
+   Used equivalent: tumbling 10-min window COUNT >= 3 for Pattern A,
+   simple WHERE taxable_income > 500000 for Pattern B. Both emit to fraud-signals topic.
+
+3. flink-sql-client entrypoint
+   Changed from ["bin/sql-client.sh"] (one-shot, exits) to ["tail", "-f", "/dev/null"]
+   (keep-alive) so submit_flink_jobs.py can repeatedly exec into the container.
+   Removed profile: ["tools"] so the container starts as part of the default stack.
+
+4. kpi-poller service
+   Uses python:3.11-slim (no custom build) with pip install at startup.
+   Polls PostgreSQL tax_kpi_windows every 30 s, writes Redis HASHes with 15 min TTL.
+   Also writes tax:kpi:latest summary key for single-read dashboard access.
+
+5. submit_flink_jobs.py
+   - Reads all job_*.sql files in /flink-jobs/
+   - Renders ${VAR} placeholders from environment / .env
+   - Writes rendered SQL to /tmp/<job>.sql inside flink-sql-client container
+   - Executes /opt/flink/bin/sql-client.sh -f <path>
+   - Emits OpenLineage START / COMPLETE / FAIL events per job
+   - Per-job lineage metadata maps each job to correct input/output datasets
+
+SMOKE TEST — STATIC VALIDATION
+--------------------------------
+[OK] flink-jobs/job_01_raw_to_minio.sql  - syntax review passed
+[OK] flink-jobs/job_02_enrich.sql        - syntax review passed
+[OK] flink-jobs/job_03_kpi_windows.sql   - FIRST_VALUE removed, MAX used
+[OK] flink-jobs/job_04_fraud_pattern.sql - two INSERT statements, HAVING COUNT >= 3
+[OK] flink-jobs/job_05_cleaned.sql       - WHERE filter, UPPER/TRIM, processed_at
+[OK] scripts/submit_flink_jobs.py        - imports, render_sql, submit_job, main
+[OK] scripts/kpi_to_redis.py             - fetch_latest_windows, write_to_redis, also_write_summary
+[OK] docker-compose.yml                  - kpi-poller service + flink-sql-client entrypoint fix
+[OK] Makefile                            - flink-up, submit-sql, submit-job, kpi-poller-up
+
+MANUAL STEPS TO START FLINK AND SUBMIT JOBS
+---------------------------------------------
+# 1. Build the Flink image (one-time, uses RUN wget — no DNS issue)
+podman build -t flink-custom:1.18 ./docker/build/flink/
+
+# 2. Start Flink cluster and SQL client container
+make flink-up
+# Wait ~30s for jobmanager to be ready
+# Verify: http://localhost:8081 shows Flink UI
+
+# 3. Verify flink-sql-client is alive
+podman exec flink-sql-client echo "alive"
+
+# 4. Submit all 5 SQL jobs
+make submit-sql
+# Expected output: 5x [OK] lines
+
+# 5. Verify in Flink UI: http://localhost:8081/#/jobs/running
+# Should show 5 jobs: job_01 through job_05
+
+# 6. Start KPI poller
+make kpi-poller-up
+make kpi-poller-logs
+# Expected: "Cached N KPI window(s) in Redis"
+
+# 7. Verify Redis keys
+podman exec redis redis-cli KEYS "tax:kpi:*"
+podman exec redis redis-cli HGETALL "tax:kpi:latest"
+
+KNOWN ISSUES / NOTES
+---------------------
+- Flink image build takes ~3-5 min (downloads 4 JARs via wget)
+- MinIO S3 endpoint for Flink filesystem connector uses s3a:// scheme
+  configured via flink-conf.yaml in the Flink image (s3.endpoint, s3.access-key, etc.)
+- kpi-poller will log "table is empty" until job_03 has produced its first 5-min window
+- fraud-signals topic may show duplicate keys from job_04 pattern B (income spike)
+  if the same application_id triggers multiple evaluations — this is expected behavior
